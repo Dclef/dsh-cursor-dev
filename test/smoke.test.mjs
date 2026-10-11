@@ -277,14 +277,30 @@ test('apply() mounts the tool and the HTTP routes against the host contract', as
     /** Minimal stand-in for the host services `apply` touches. */
     const ctx = {
         logger: { info: () => {}, warn: () => {}, error: () => {} },
-        baseDir: dataDir,
         tools: { register: (definition) => { registered = definition; return () => { registered = undefined; }; } },
         subprocess: { spawn: testSpawn },
-        get: (name) => (name === 'webServer'
-            ? { register: (route) => { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1); }; } }
-            : undefined),
+        get: (name) => {
+            if (name === 'webServer') {
+                return { register: (route) => { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1); }; } };
+            }
+            if (name === 'baseDir') return dataDir;
+            return undefined;
+        },
         effect: (factory) => { const dispose = factory(); disposers.push(dispose); return () => {}; },
     };
+
+    // Cordis throws `cannot get property "baseDir" without inject` when a service
+    // is read as a plain property. Emulate that here: a real mount once failed on
+    // exactly this line while this fake happily exposed `baseDir`.
+    Object.defineProperty(ctx, 'baseDir', {
+        enumerable: true,
+        get: () => {
+            if (!plugin.inject?.includes('baseDir')) {
+                throw new Error('cannot get property "baseDir" without inject');
+            }
+            return dataDir;
+        },
+    });
 
     try {
         plugin.apply(ctx, new plugin.Config({}));

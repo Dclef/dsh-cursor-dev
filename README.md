@@ -35,9 +35,15 @@ DSH 自带的 ACP 子智能体通道（`@deepseek-ai/dsh-subagent-acp`）能力�
 - Node `^22.19.0 || >=24.0.0`
 - 已安装并登录 Cursor CLI（`agent status` 能看到 `✓ Logged in`）。插件会自动在 `PATH`、`%LOCALAPPDATA%\cursor-agent` 等位置找它，找不到会在启动时报错。
 
-本插件是一个 **DSH bundle**（自带 `cordis.patch.yml`，`package.json` 里声明了 `dsh.bundle`），所以在 DSH 里按 bundle 安装即可。
+本插件是一个 **DSH bundle**（自带 `cordis.patch.yml`，`package.json` 里声明了 `dsh.bundle`），所以按 bundle 安装即可：
 
-本地 checkout 安装（包还没发布到 npm 时）：
+```sh
+dsh plugin add dsh-cursor-dev
+```
+
+装完重启 DSH，`cursor_code` 就会出现在工具列表里。
+
+**桌面版 / 手动安装**：桌面版 DSH 没有 `dsh` CLI，改成在 profile 里登记——把 `dsh-cursor-dev` 加进 `dsh.profile.bundles`，并在 `dependencies` 里指向本包：
 
 ```jsonc
 // <profile>/package.json
@@ -47,7 +53,7 @@ DSH 自带的 ACP 子智能体通道（`@deepseek-ai/dsh-subagent-acp`）能力�
 }
 ```
 
-然后在 profile 目录执行包管理器安装并重启 DSH。安装后 `cursor_code` 会出现在工具列表里。
+然后安装依赖并重启。
 
 ### `cursor_code` 工具
 
@@ -139,7 +145,13 @@ DSH `>= 0.2.0-rc.1`, Node `^22.19.0 || >=24.0.0`, and a logged-in Cursor CLI (`a
 
 ### Install
 
-This package is a DSH bundle (it ships `cordis.patch.yml` and declares `dsh.bundle` in `package.json`). Install it as a bundle: add `"dsh-cursor-dev"` to `dsh.profile.bundles` and to `dependencies` in your profile's `package.json` (use `"link:<path>"` for a local checkout), install, and restart DSH. `cursor_code` then appears in the tool list.
+This package is a DSH bundle (it ships `cordis.patch.yml` and declares `dsh.bundle` in `package.json`):
+
+```sh
+dsh plugin add dsh-cursor-dev
+```
+
+On the desktop app, which has no `dsh` CLI, register it in your profile instead: add `"dsh-cursor-dev"` to `dsh.profile.bundles` and point `dependencies` at this package (use `"link:<path>"` for a local checkout), install, and restart DSH. `cursor_code` then appears in the tool list.
 
 ### Usage
 
