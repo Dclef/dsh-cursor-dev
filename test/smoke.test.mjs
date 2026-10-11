@@ -796,3 +796,98 @@ test('a missing Cursor CLI degrades the tool instead of failing the mount', asyn
 
     await safeRemove(dataDir);
 });
+
+/**
+ * The host accepts only a JSON Schema subset (see `assertSupportedJsonSchema`
+ * in `@deepseek-ai/dsh-tools`): a single `type` string, `oneOf`, and the
+ * constraint keywords that match that type. Type arrays are rejected outright —
+ * which is how a `type: ['string', 'null']` passed this offline suite and only
+ * blew up when the plugin was installed into a real profile.
+ */
+const HOST_SCHEMA_TYPES = ['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'];
+const HOST_CONSTRAINT_KEYWORDS = new Set(['type', 'oneOf', 'properties', 'required', 'additionalProperties', 'items', 'enum', 'const']);
+const HOST_ANNOTATION_KEYWORDS = new Set(['description', 'title', 'default', 'examples']);
+const HOST_SIBLING_KEYWORDS = ['properties', 'required', 'additionalProperties', 'items', 'enum', 'const'];
+const HOST_KEYWORD_TYPES = {
+    properties: ['object'],
+    required: ['object'],
+    additionalProperties: ['object'],
+    items: ['array'],
+    enum: ['string', 'number', 'integer', 'boolean', 'null'],
+    const: ['string', 'number', 'integer', 'boolean', 'null'],
+};
+
+/** Collect every way `node` breaks the host's schema subset. */
+function hostSchemaViolations(node, path = 'schema', out = []) {
+    if (node === null || typeof node !== 'object' || Array.isArray(node)) {
+        out.push(`${path} must be a schema object`);
+        return out;
+    }
+    for (const key of Object.keys(node)) {
+        if (HOST_CONSTRAINT_KEYWORDS.has(key) || HOST_ANNOTATION_KEYWORDS.has(key))
+            continue;
+        out.push(`${path}.${key} is not a supported keyword`);
+    }
+    const hasType = Object.hasOwn(node, 'type');
+    const hasOneOf = Object.hasOwn(node, 'oneOf');
+    if (hasType && hasOneOf) {
+        out.push(`${path} cannot declare both type and oneOf`);
+        return out;
+    }
+    if (!hasType && !hasOneOf) {
+        for (const key of HOST_SIBLING_KEYWORDS) {
+            if (Object.hasOwn(node, key))
+                out.push(`${path}.${key} requires type or oneOf`);
+        }
+        return out;
+    }
+    if (hasOneOf) {
+        if (!Array.isArray(node.oneOf) || node.oneOf.length < 2)
+            out.push(`${path}.oneOf must hold at least two schemas`);
+        else
+            node.oneOf.forEach((branch, index) => hostSchemaViolations(branch, `${path}.oneOf[${index}]`, out));
+        return out;
+    }
+    const { type } = node;
+    if (typeof type !== 'string' || !HOST_SCHEMA_TYPES.includes(type)) {
+        out.push(Array.isArray(type)
+            ? `${path}.type must be a single type string (type arrays are not supported)`
+            : `${path}.type must be one of ${HOST_SCHEMA_TYPES.join('/')}`);
+        return out;
+    }
+    for (const [key, types] of Object.entries(HOST_KEYWORD_TYPES)) {
+        if (Object.hasOwn(node, key) && !types.includes(type))
+            out.push(`${path}.${key} is not supported on type "${type}"`);
+    }
+    if (type === 'object' && Object.hasOwn(node, 'properties')) {
+        for (const [name, child] of Object.entries(node.properties))
+            hostSchemaViolations(child, `${path}.properties.${name}`, out);
+    }
+    if (type === 'array' && Object.hasOwn(node, 'items'))
+        hostSchemaViolations(node.items, `${path}.items`, out);
+    return out;
+}
+
+test('both tool schemas stay inside the subset the host accepts', () => {
+    // Prove the checker itself catches the bug that reached the profile.
+    assert.deepEqual(hostSchemaViolations({ type: ['string', 'null'] }, 's'), [
+        's.type must be a single type string (type arrays are not supported)',
+    ]);
+    assert.deepEqual(hostSchemaViolations({ type: 'string', items: { type: 'string' } }, 's'), [
+        's.items is not supported on type "string"',
+    ]);
+    assert.deepEqual(hostSchemaViolations({ type: 'string', oneOf: [{ type: 'string' }] }, 's'), [
+        's cannot declare both type and oneOf',
+    ]);
+    // Annotation-only schemas are the host's unconstrained-JSON form.
+    assert.deepEqual(hostSchemaViolations({ description: 'anything' }, 's'), []);
+
+    const tool = cursorCodeTool({
+        pool: { snapshot: () => [] },
+        journal: new RunJournal({}),
+        index: { get: async () => undefined },
+        maxScanFiles: 10,
+    });
+    assert.deepEqual(hostSchemaViolations(tool.parameters, 'parameters'), []);
+    assert.deepEqual(hostSchemaViolations(tool.output.schema, 'output.schema'), []);
+});
