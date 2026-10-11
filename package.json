@@ -1,0 +1,56 @@
+{
+  "name": "dsh-cursor-dev",
+  "displayName": "Cursor developer subagent",
+  "description": "Run the Cursor CLI as a child coding agent: per-task model choice, conversation continuity across restarts, live progress and real diffs, plus a Cursor usage/quota dashboard.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "test": "node --test --test-force-exit test/"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "cursor",
+    "acp",
+    "subagent",
+    "coding-agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Dclef/dsh-cursor-dev.git"
+  },
+  "homepage": "https://github.com/Dclef/dsh-cursor-dev#readme",
+  "bugs": {
+    "url": "https://github.com/Dclef/dsh-cursor-dev/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "engines": {
+      "dsh": ">=0.2.0-rc.1"
+    }
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^1.4.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  }
+}

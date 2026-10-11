@@ -1,0 +1,15 @@
+# Dependencies (only the local dev junctions in this checkout)
+node_modules/
+
+# Plugin runtime data (conversation index, journals)
+.data/
+
+# Test scratch output
+.test-output.txt
+.test-live.txt
+result.txt
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.log

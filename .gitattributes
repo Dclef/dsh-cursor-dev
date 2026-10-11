@@ -1,0 +1,17 @@
+# Keep line endings stable across platforms.
+* text=auto eol=lf
+
+# Windows batch/PowerShell helpers, if any are ever added, must stay CRLF.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets are never normalized.
+*.png binary
+*.jpg binary
+*.gif binary
+*.webp binary
+*.tgz binary
+
+# Generated and vendored content is excluded from language stats and diffs.
+package-lock.json -diff linguist-generated
+pnpm-lock.yaml -diff linguist-generated

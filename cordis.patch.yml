@@ -1,0 +1,6 @@
+# Register the Cursor developer subagent plugin. This plugin talks the Agent
+# Client Protocol to the Cursor CLI directly, so it needs no browser half: its
+# dashboard is served as plain HTML from the host web server.
+- insert:
+    - id: dsh-cursor-dev
+      name: dsh-cursor-dev
