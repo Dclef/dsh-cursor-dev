@@ -740,3 +740,59 @@ test('argument validation rejects an empty task', async () => {
     assert.equal(result.ok, false);
     assert.match(result.error, /task/i);
 });
+
+test('a missing Cursor CLI degrades the tool instead of failing the mount', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'dsh-nocli-'));
+    const routes = new Map();
+    const mounted = [];
+    const warnings = [];
+    const ctx = {
+        logger: { info: () => {}, warn: message => warnings.push(String(message)), error: () => {} },
+        tools: { register: definition => { mounted.push(definition); return () => {}; } },
+        subprocess: { spawn: () => { throw new Error('must not spawn without a CLI'); } },
+        get: name => {
+            if (name === 'webServer')
+                return { register: route => { routes.set(route.path, route); return () => routes.delete(route.path); } };
+            return name === 'baseDir' ? dataDir : undefined;
+        },
+        effect: () => {},
+    };
+    const plugin = await import('../lib/index.js');
+    // Hide the CLI the way a machine without it looks: no PATH, no LOCALAPPDATA.
+    const savedPath = process.env.PATH;
+    const savedLocal = process.env.LOCALAPPDATA;
+    try {
+        delete process.env.PATH;
+        delete process.env.LOCALAPPDATA;
+        plugin.apply(ctx, new plugin.Config({}));
+    }
+    finally {
+        process.env.PATH = savedPath;
+        process.env.LOCALAPPDATA = savedLocal;
+    }
+
+    assert.equal(warnings.length, 1, warnings.join(' | '));
+    assert.match(warnings[0], /could not find the Cursor CLI/);
+    // Everything that does not need the CLI still mounts.
+    assert.equal(mounted.length, 1);
+    assert.equal(mounted[0].name, 'cursor_code');
+    assert.equal(routes.size, 4, [...routes.keys()].join(', '));
+
+    const failed = await mounted[0].execute({ task: 'do something' },
+        { agent: { id: 'p' }, signal: new AbortController().signal });
+    assert.equal(failed.ok, false);
+    assert.match(failed.error, /could not find the Cursor CLI/);
+
+    // The status route must answer rather than throw on a missing agent.
+    const status = routes.get('/plugins/dsh-cursor-dev/status');
+    const chunks = [];
+    let code;
+    status.handler({ url: '/plugins/dsh-cursor-dev/status' }, {
+        writeHead: value => { code = value; },
+        end: body => { chunks.push(body); },
+    });
+    assert.equal(code, 200);
+    assert.equal(JSON.parse(chunks.join('')).agent, null);
+
+    await safeRemove(dataDir);
+});
