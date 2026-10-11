@@ -2,6 +2,8 @@
 
 **把 Cursor CLI 当成 DSH 的子智能体来写业务代码：你聊天的模型负责决策，Cursor 负责落地。**
 
+![Cursor 面板：额度、子智能体模型与会话](screenshots/panel-zh.png)
+
 [中文](#中文) · [English](#english)
 
 ---
@@ -24,7 +26,23 @@
 
 - DSH `>= 0.2.0-rc.1`
 - Node `^22.19.0 || >=24.0.0`
-- 已安装并登录 Cursor CLI（`agent status` 能看到 `✓ Logged in`）。插件会自动在 `PATH`、`%LOCALAPPDATA%\cursor-agent` 等位置找它。找不到时插件**照样挂载**（额度面板和会话列表仍然可用），只是 `cursor_code` 会返回一条说明，告诉你去装 CLI 或改 `command` 配置。
+- **Cursor CLI 已安装并登录**。没装过的话，把它装上（一条命令，装到 `%LOCALAPPDATA%\cursor-agent`）：
+
+  ```sh
+  # Windows PowerShell
+  irm 'https://cursor.com/install?win32=true' | iex
+  # macOS / Linux
+  curl https://cursor.com/install -fsS | bash
+  ```
+
+  然后登录（会打开浏览器授权；`NO_OPEN_BROWSER=1` 可以关掉自动开浏览器），并确认状态：
+
+  ```sh
+  agent login
+  agent status --format json   # 期望看到 "isAuthenticated": true 和你的邮箱
+  ```
+
+  插件会自动在 `PATH`、`%LOCALAPPDATA%\cursor-agent` 等位置找它。**没装或没登录时插件照样挂载**（额度面板、会话列表仍然可用），**面板会直接告诉你缺的是哪一步、要跑哪条命令**，`cursor_code` 也会返回同一条说明——不用翻日志猜。
 
 本插件是一个 **DSH bundle**（自带 `cordis.patch.yml`，`package.json` 里声明了 `dsh.bundle`），所以按 bundle 安装即可：
 
@@ -87,6 +105,8 @@ dsh plugin add dsh-cursor-dev
 
 Cursor 没有任何 CLI 命令能查额度，所以插件自己调它的 dashboard RPC 并把结果 host 起来。页面是 **设置 → Cursor 子智能体**。
 
+![设置里的 Cursor 子智能体](screenshots/panel-zh-settings.png)
+
 页面默认中文（跟随 DSH 的语言设置），右上角 `中文 / English` 一键切换，选择记在本机、也会写回插件设置。
 
 - **额度** —— 包含额度、auto 桶、API 桶、花费、计费周期，30 秒自动刷新。
@@ -142,7 +162,19 @@ It gives the model you chat with one more tool: **`cursor_code`**. That model th
 
 ### Requirements
 
-DSH `>= 0.2.0-rc.1`, Node `^22.19.0 || >=24.0.0`, and a logged-in Cursor CLI (`agent status`).
+DSH `>= 0.2.0-rc.1`, Node `^22.19.0 || >=24.0.0`, and the **Cursor CLI installed and signed in** — install it and log in first:
+
+```sh
+# Windows PowerShell
+irm 'https://cursor.com/install?win32=true' | iex
+# macOS / Linux
+curl https://cursor.com/install -fsS | bash
+
+agent login                    # opens the browser (NO_OPEN_BROWSER=1 to skip that)
+agent status --format json     # expect "isAuthenticated": true and your email
+```
+
+The plugin finds the CLI on `PATH` (and in `%LOCALAPPDATA%\cursor-agent`). **A missing or signed-out CLI does not take the plugin down**: the panel, the quota view and the conversation list still work, the panel says which step is missing and prints the command that fixes it, and `cursor_code` returns that same explanation.
 
 ### Install
 
