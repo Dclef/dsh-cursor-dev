@@ -270,7 +270,20 @@ test('the package manifest is installable as a DSH bundle', async () => {
     assert.equal(manifest.dsh?.client?.platform, 'web');
     assert.ok(Array.isArray(manifest.dsh?.client?.inject));
     assert.equal(manifest.dsh?.manifestVersion, 1);
-    const clientBundle = await readFile(join(here, 'lib', 'client.js'), 'utf8');
+    // DSH resolves the browser half through the package export map, not by path:
+    // `client-modules` throws `declares dsh.client but exports no "./client"
+    // bundle` when `exports["./client"]` is missing, so the claim above is only
+    // real when that subpath resolves to the file we ship.
+    const clientExport = manifest.exports?.['./client'];
+    const clientRel = typeof clientExport === 'string'
+        ? clientExport
+        : typeof clientExport?.default === 'string' ? clientExport.default : undefined;
+    assert.equal(
+        typeof clientRel,
+        'string',
+        'exports["./client"] must be a string or an object with a string default',
+    );
+    const clientBundle = await readFile(join(here, clientRel.replace(/^\.\//, '')), 'utf8');
     assert.ok(clientBundle.length > 0, 'the declared client bundle is empty');
     // Officially-provided packages must be peers, never bundled dependencies.
     assert.equal(typeof manifest.peerDependencies?.['@deepseek-ai/schemastery'], 'string');
