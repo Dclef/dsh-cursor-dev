@@ -225,7 +225,12 @@ test('every lib module imports and the entry point is a valid plugin', async () 
     // A broken relative import inside lib/ only shows up when DSH tries to load
     // the plugin. The rest of this suite imports the modules directly, so it
     // would never notice lib/index.js being unimportable.
-    const files = (await readdir(join(here, 'lib'))).filter(name => name.endsWith('.js')).sort();
+    // `client.js` is the browser half: it is a classic script for the runtime's
+    // module loader (`window.__ModuleLoader__.load`), so Node cannot import it.
+    // client.test.mjs loads it the way the browser does and asserts its shape.
+    const libFiles = await readdir(join(here, 'lib'));
+    const files = libFiles.filter(name => name.endsWith('.js') && name !== 'client.js').sort();
+    assert.ok(libFiles.includes('client.js'), 'the browser half lib/client.js is missing');
     assert.ok(files.length >= 10, `expected the lib modules, found ${files.length}`);
     for (const file of files)
         assert.equal(typeof await import(new URL(`../lib/${file}`, import.meta.url).href), 'object', `${file} failed to import`);
@@ -259,8 +264,14 @@ test('the package manifest is installable as a DSH bundle', async () => {
     const patchText = await readFile(join(here, patch.replace(/^\.\//, '')), 'utf8');
     assert.match(patchText, /id: dsh-cursor-dev/);
     assert.match(patchText, /name: dsh-cursor-dev/);
-    // No browser half, so there must be no dsh.client claim.
-    assert.equal(manifest.dsh?.client, undefined);
+    // The browser half is declared, and the file it points at exists. DSH serves
+    // `lib/client.js` for a `platform: "web"` client plugin; without the claim the
+    // Sidebar panel is never loaded.
+    assert.equal(manifest.dsh?.client?.platform, 'web');
+    assert.ok(Array.isArray(manifest.dsh?.client?.inject));
+    assert.equal(manifest.dsh?.manifestVersion, 1);
+    const clientBundle = await readFile(join(here, 'lib', 'client.js'), 'utf8');
+    assert.ok(clientBundle.length > 0, 'the declared client bundle is empty');
     // Officially-provided packages must be peers, never bundled dependencies.
     assert.equal(typeof manifest.peerDependencies?.['@deepseek-ai/schemastery'], 'string');
     assert.equal(manifest.dependencies?.['@deepseek-ai/schemastery'], undefined);
