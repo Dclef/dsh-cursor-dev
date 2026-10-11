@@ -8,20 +8,11 @@
 
 ## 中文
 
-### 它解决什么问题
+### 它做什么
 
-DSH 自带的 ACP 子智能体通道（`@deepseek-ai/dsh-subagent-acp`）能力是硬编码关闭的，所以基于它的 Cursor 插件只能做到「把一整段提示词丢过去，等一段总结回来」：
+装上之后，你在 DSH 里聊天的那个模型手里多一把工具：**`cursor_code`**。它负责想、负责判断、负责决定怎么改；真正动手的活交给本机的 Cursor CLI，在你的工作区里直接落地 —— 写新功能、重构、修 bug、补测试、跨文件机械改动，都是它的活。
 
-| 自带通道的限制 | 后果 |
-| --- | --- |
-| `capabilities.agentOptions = false` | 父模型**没法按任务挑模型/档位**，模型只能全局改一次 |
-| 只实现 `start()`，没有 `prepareContinuable` / `sendMessage` | **一次调用一个进程**，说完就散，接不上上一轮 |
-| 除最终消息外的 `session/update` 全部丢弃 | **看不到子智能体在干什么**——思考、每次工具调用、真实 diff 都拿不到 |
-| `inheritsParentContext = false` | 上下文全靠父模型手写 |
-
-`dsh-cursor-dev` 不走那条通道，而是**自己直连 ACP**，因此可以：
-
-- **按次选模型** —— `model: "composer-2.5[fast=true]"` 干杂活，`model: "grok-4.7"` 做架构，成本与质量自己权衡；档位后缀（`reasoning_effort`、`fast`）原样透传。
+- **按次挑模型** —— `model: "composer-2.5[fast=true]"` 干杂活，`model: "grok-4.7"` 做架构，成本与质量自己权衡；档位后缀（`reasoning_effort`、`fast`）原样透传。
 - **真正的续聊** —— `continueSession: true` 复用同一个 Cursor 会话。进程被回收、**甚至 DSH 重启之后也还记得**：会话会从 Cursor 自己的会话库里 `session/load` 回来。
 - **看得见** —— 每次调用都返回**逐步工具时间线**和**真实文件 diff**（`{oldText,newText}`），UI 里直接渲染成一张 diff 卡片，而不是让你相信一段总结。
 - **独立证据** —— 回合前后各做一次文件指纹，**shell 命令写出来的文件也跑不掉**（这类改动根本不在 ACP 流里）；ACP diff 与指纹结果合并成一份变更清单。
@@ -33,7 +24,7 @@ DSH 自带的 ACP 子智能体通道（`@deepseek-ai/dsh-subagent-acp`）能力�
 
 - DSH `>= 0.2.0-rc.1`
 - Node `^22.19.0 || >=24.0.0`
-- 已安装并登录 Cursor CLI（`agent status` 能看到 `✓ Logged in`）。插件会自动在 `PATH`、`%LOCALAPPDATA%\cursor-agent` 等位置找它，找不到会在启动时报错。
+- 已安装并登录 Cursor CLI（`agent status` 能看到 `✓ Logged in`）。插件会自动在 `PATH`、`%LOCALAPPDATA%\cursor-agent` 等位置找它。找不到时插件**照样挂载**（额度面板和会话列表仍然可用），只是 `cursor_code` 会返回一条说明，告诉你去装 CLI 或改 `command` 配置。
 
 本插件是一个 **DSH bundle**（自带 `cordis.patch.yml`，`package.json` 里声明了 `dsh.bundle`），所以按 bundle 安装即可：
 
@@ -119,7 +110,7 @@ Cursor 没有任何 CLI 命令能查额度，所以插件自己调它的 dashboa
 npm test        # node --test --test-force-exit test/
 ```
 
-16 个测试，**不需要 DSH**：真实的 Cursor CLI 加上真实插件模块，覆盖模型切换、`continueSession` 复用、**新进程 `session/load` 后仍能记起自己写过什么**、真实 diff、坏模型报错、额度 RPC 及其降级、以及 HTTP 路由契约。
+21 个测试，**不需要 DSH**：真实的 Cursor CLI 加上真实插件模块，覆盖模型切换、`continueSession` 复用、**新进程 `session/load` 后仍能记起自己写过什么**、真实 diff、坏模型报错、额度 RPC 及其降级、把路由挂到真实 HTTP 服务上跑一遍、以及「找不到 CLI 时插件照样挂载、只有工具报错」。
 
 ---
 
@@ -127,11 +118,9 @@ npm test        # node --test --test-force-exit test/
 
 **Run the Cursor CLI as a child coding agent under your DSH parent model: the model you chat with decides, Cursor does the work.**
 
-### Why
+### What it does
 
-DSH's built-in ACP subagent path (`@deepseek-ai/dsh-subagent-acp`) has its capabilities hard-coded off, so a Cursor plugin built on it can only hand over one big prompt and wait for one summary: no per-task model choice (`agentOptions: false`), no continuation (`start()` only — no `prepareContinuable`/`sendMessage`, one process per call), and no visibility (every `session/update` except the final message text is dropped).
-
-`dsh-cursor-dev` speaks ACP directly instead, so it can:
+It gives the model you chat with one more tool: **`cursor_code`**. That model thinks, decides and reviews; the actual code changes happen through the Cursor CLI already installed and signed in on your machine, inside your workspace — new features, refactors, bug fixes, tests, mechanical edits across files.
 
 - **Pick the model per call** — `composer-2.5[fast=true]` for boilerplate, `grok-4.7` for architecture; effort/fast suffixes pass through.
 - **Continue a conversation for real** — `continueSession: true` reuses the same Cursor session, and it still remembers after the process is reaped or **DSH restarts** (reloaded from Cursor's own session store via `session/load`).
