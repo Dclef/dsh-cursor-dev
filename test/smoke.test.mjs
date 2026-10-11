@@ -15,6 +15,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, readdir, mkdir, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -486,6 +487,98 @@ test('usage routes register against the host contract and answer HTTP', async ()
         assert.equal(routes.size, 0, 'dispose must remove every route');
     }
     finally {
+        await safeRemove(dir);
+    }
+});
+
+test('the routes answer real HTTP and a throwing view becomes a 500', { timeout: 60_000 }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-http-'));
+    const journal = new RunJournal({});
+    const index = new ConversationIndex(dir);
+    await index.load();
+    await index.set('b::default', { cursorSessionId: 'sid-2', workspaceRoot: 'C:\\w', model: 'kimi-k3', turns: 1 });
+    journal.append('b#0', { kind: 'tool-call', call: { id: 'c1', name: 'Edit File', kind: 'edit', path: 'src/app.js', status: 'pending' } });
+    journal.append('b#0', { kind: 'tool-update', call: { id: 'c1', name: 'Edit File', kind: 'edit', path: 'src/app.js', status: 'completed' }, diffCount: 2 });
+    // Malformed events used to throw inside the HTTP handler, where a throw is a
+    // process-level unhandled exception rather than a 500. They must be skipped.
+    journal.append('b#0', { kind: 'tool-call' });
+    journal.append('b#0', { kind: 'tool-update' });
+    journal.annotate('b#0', { task: 'add a health endpoint' });
+
+    const routes = new Map();
+    const ctx = {
+        get: name => (name === 'webServer' ? { register: route => { routes.set(route.path, route); return () => routes.delete(route.path); } } : undefined),
+        logger: { warn: message => console.log(`[warn] ${message}`) },
+    };
+    const server = createServer((req, res) => {
+        const route = routes.get(new URL(req.url, 'http://127.0.0.1').pathname);
+        if (route === undefined) {
+            res.writeHead(404);
+            res.end('no route');
+            return;
+        }
+        // Deliberately unguarded, exactly like a host that does not wrap its
+        // route handlers: an escaping exception would be an unhandled error
+        // here, so this is what proves the plugin's own guard works.
+        void route.handler(req, res);
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    let dispose;
+    try {
+        dispose = registerUsageRoutes(ctx, {
+            usage: new UsageClient({}),
+            pool: { snapshot: () => [], queued: 0 },
+            journal,
+            index,
+            dataDir: dir,
+        });
+
+        const page = await fetch(`${base}/plugins/dsh-cursor-dev/`);
+        assert.equal(page.status, 200);
+        assert.match(page.headers.get('content-type'), /text\/html/);
+        const html = await page.text();
+        assert.match(html, /id="bootstrap"/);
+        assert.match(html, /id="live"/);
+        assert.ok(!html.includes('${'), 'the dashboard template must be fully interpolated');
+
+        const usage = await fetch(`${base}/plugins/dsh-cursor-dev/api/usage`);
+        assert.equal(usage.status, 200);
+        assert.match(usage.headers.get('content-type'), /application\/json/);
+        const payload = await usage.json();
+        assert.equal(payload.extended.journal.keys, 1);
+        assert.equal(payload.extended.conversations.length, 1);
+
+        const found = await fetch(`${base}/plugins/dsh-cursor-dev/api/journal?key=${encodeURIComponent('b#0')}`);
+        assert.equal(found.status, 200);
+        const timeline = await found.json();
+        assert.equal(timeline.task, 'add a health endpoint');
+        assert.equal(timeline.steps.length, 1, JSON.stringify(timeline.steps));
+        assert.equal(timeline.steps[0].id, 'c1');
+        assert.equal(timeline.steps[0].status, 'completed');
+        assert.equal(timeline.steps[0].path, 'src/app.js');
+        assert.equal(timeline.steps[0].diffCount, 2);
+
+        const missing = await fetch(`${base}/plugins/dsh-cursor-dev/api/journal?key=nope`);
+        assert.equal(missing.status, 404);
+        dispose();
+        assert.equal(routes.size, 0);
+
+        // A view bug must degrade to a logged 500, never to a dead host.
+        dispose = registerUsageRoutes(ctx, {
+            usage: new UsageClient({}),
+            pool: { snapshot: () => { throw new Error('snapshot exploded'); }, queued: 0 },
+            journal,
+            index,
+            dataDir: dir,
+        });
+        const failed = await fetch(`${base}/plugins/dsh-cursor-dev/api/usage`);
+        assert.equal(failed.status, 500);
+        assert.match((await failed.json()).error, /snapshot exploded/);
+    }
+    finally {
+        dispose?.();
+        await new Promise(resolve => server.close(resolve));
         await safeRemove(dir);
     }
 });

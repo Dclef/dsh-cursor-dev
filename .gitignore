@@ -9,6 +9,10 @@ node_modules/
 .test-live.txt
 result.txt
 
+# Scratch files
+.commit-msg.txt
+.probe-*.mjs
+
 # Editor / OS noise
 .DS_Store
 Thumbs.db
