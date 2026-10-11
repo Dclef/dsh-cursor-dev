@@ -176,14 +176,90 @@ test('apply registers one Cursor page in Settings, under the native slot name', 
     const { ctx } = fakeContext({ slots: slots.service });
     exports.apply(ctx);
 
-    assert.deepEqual(slots.calls.inject, ['settings.section'], 'a Settings page is a settings.section entry');
-    assert.equal(slots.calls.register.length, 1, 'exactly one Settings page is registered');
+    assert.deepEqual(slots.calls.inject, [
+        'settings.section',
+        'conversation.session.header.utilities',
+        'shell.overlay',
+    ], 'the panel takes the Settings page, a conversation-header chip, and the frame-wide overlay');
+    assert.equal(slots.calls.register.length, 3, 'three native seats are registered');
     const { options, component } = slots.calls.register[0];
     assert.equal(options.name, 'settings.section');
     assert.equal(options.id, 'dsh-cursor-dev');
     assert.equal(options.order, 62);
     assert.equal(typeof options.label, 'function');
     assert.equal(typeof component, 'function');
+});
+
+test('the conversation header carries a Cursor chip, in front of the overlay it opens', () => {
+    const { exports } = loadBundle();
+    const slots = fakeSlots();
+    exports.apply(fakeContext({ slots: slots.service }).ctx);
+
+    const chip = slots.calls.register[1];
+    const overlay = slots.calls.register[2];
+    assert.equal(chip.options.name, 'conversation.session.header.utilities');
+    assert.equal(chip.options.id, 'dsh-cursor-dev');
+    assert.equal(chip.options.order, 40);
+    assert.equal(overlay.options.name, 'shell.overlay');
+    assert.equal(overlay.options.order, 90);
+    assert.equal(typeof chip.component, 'function');
+    assert.equal(typeof overlay.component, 'function');
+    assert.notEqual(chip.component, overlay.component, 'the chip and the panel are separate components');
+});
+
+test('the header chip shows the live session count and the model it is running', async () => {
+    const react = makeReact();
+    const { exports } = loadBundle({ react: react.api });
+    const slots = fakeSlots();
+    exports.apply(fakeContext({ slots: slots.service, locale: fakeLocale('zh') }).ctx);
+    const chip = slots.calls.register[1].component;
+
+    render(chip, react, {});
+    await probe(react, statusAnswer({ agent: { found: true }, live: [{ model: 'composer-2.5[fast=true]' }] }));
+
+    const element = render(chip, react, {});
+    assert.equal(element.type, 'button', 'the chip is a button');
+    assert.match(JSON.stringify(element.children), /Cursor · 1/, 'the live count is in the label');
+    assert.match(String(element.props.title), /composer-2\.5\[fast=true\]/, 'the model it is running is in the tooltip');
+
+    const empty = render(chip, react, {});
+    assert.ok(empty, 'a chip with no live session still renders');
+});
+
+test('the chip opens the frame-wide panel, and its close button shuts it', () => {
+    // One harness: both seats are rendered by the same bundle, so they share
+    // the module's `react` — and, deliberately, the same hook slots, which is
+    // what lets a click on one be observed by the other.
+    const react = makeReact();
+    const { exports } = loadBundle({ react: react.api });
+    const slots = fakeSlots();
+    exports.apply(fakeContext({ slots: slots.service }).ctx);
+    const chip = slots.calls.register[1].component;
+    const overlay = slots.calls.register[2].component;
+
+    // Mount the overlay while it is still closed: it renders nothing, but it
+    // subscribes to the shared state, which is what the chip notifies. Its
+    // effect is slot 1 (the open state is slot 0).
+    assert.equal(render(overlay, react), null, 'a closed panel renders nothing');
+    react.hooks.effects[1]();
+
+    render(chip, react);
+    const closed = render(overlay, react);
+    assert.equal(closed, null);
+
+    render(chip, react).props.onClick();
+    const opened = render(overlay, react);
+    assert.equal(opened.type, 'div', 'the chip opens the panel');
+    assert.equal(opened.props.style.position, 'fixed', 'the panel floats above the frame, out of the header\'s flow');
+    assert.equal(typeof opened.children[1].children[0].type, 'function', 'the panel mounts the shared host frame');
+
+    const head = opened.children[0];
+    const link = head.children.find(child => child?.type === 'a');
+    assert.equal(link.props.href, '/plugins/dsh-cursor-dev/?lang=zh', 'the panel links to the same dashboard in a tab');
+    const close = head.children.find(child => child?.type === 'button' && child.children.includes('✕'));
+    assert.ok(close, 'the panel can be closed from its own header');
+    close.props.onClick();
+    assert.equal(render(overlay, react), null, 'closing hides the panel again');
 });
 
 test('the Settings label follows the app locale, and defaults to Chinese', () => {
