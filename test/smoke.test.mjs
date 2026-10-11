@@ -889,7 +889,11 @@ test('a missing Cursor CLI degrades the tool instead of failing the mount', asyn
     }
 
     assert.equal(warnings.length, 1, warnings.join(' | '));
-    assert.match(warnings[0], /could not find the Cursor CLI/);
+    assert.match(warnings[0], /the Cursor CLI was not found/);
+    // The warning is the setup path itself: a user who just installed this
+    // plugin reads it (or the same text in the panel) and knows what to run.
+    assert.match(warnings[0], /cursor\.com\/install\?win32=true/);
+    assert.match(warnings[0], /agent login/);
     // Everything that does not need the CLI still mounts.
     assert.equal(mounted.length, 1);
     assert.equal(mounted[0].name, 'cursor_code');
@@ -899,7 +903,8 @@ test('a missing Cursor CLI degrades the tool instead of failing the mount', asyn
     const failed = await mounted[0].execute({ task: 'do something' },
         { agent: { id: 'p' }, signal: new AbortController().signal });
     assert.equal(failed.ok, false);
-    assert.match(failed.error, /could not find the Cursor CLI/);
+    assert.match(failed.error, /the Cursor CLI was not found/);
+    assert.match(failed.error, /agent login/);
 
     // The settings route must answer with the reason the picker is empty
     // instead of failing the request.
@@ -916,16 +921,27 @@ test('a missing Cursor CLI degrades the tool instead of failing the mount', asyn
     assert.match(settingsBody.models.error, /Cursor CLI is not available/);
     assert.equal(settingsBody.effectiveModel, '');
 
-    // The status route must answer rather than throw on a missing agent.
+    // The status route must answer rather than throw on a missing agent, and it
+    // must say *which* step of the setup is missing — that is what turns a panel
+    // of dashes into the two commands that fix it.
     const status = routes.get('/plugins/dsh-cursor-dev/status');
     const chunks = [];
     let code;
-    status.handler({ url: '/plugins/dsh-cursor-dev/status' }, {
+    await status.handler({ url: '/plugins/dsh-cursor-dev/status' }, {
         writeHead: value => { code = value; },
         end: body => { chunks.push(body); },
     });
     assert.equal(code, 200);
-    assert.equal(JSON.parse(chunks.join('')).agent, null);
+    const statusBody = JSON.parse(chunks.join(''));
+    assert.equal(statusBody.agent.found, false);
+    assert.equal(statusBody.agent.command, '');
+    assert.equal(statusBody.auth.ok, false);
+    assert.equal(statusBody.auth.installed, false);
+    assert.equal(statusBody.auth.authenticated, false);
+    assert.match(statusBody.auth.error, /not found/);
+    assert.match(statusBody.setup.install.win32, /cursor\.com\/install\?win32=true/);
+    assert.match(statusBody.setup.install.unix, /cursor\.com\/install -fsS \| bash/);
+    assert.equal(statusBody.setup.login, 'agent login');
 
     await safeRemove(dataDir);
 });

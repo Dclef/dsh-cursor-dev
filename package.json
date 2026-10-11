@@ -1,8 +1,8 @@
 {
   "name": "dsh-cursor-dev",
-  "displayName": "Cursor developer subagent",
-  "description": "Run the Cursor CLI as a child coding agent: per-task model choice, conversation continuity across restarts, live progress and real diffs, plus a Cursor usage/quota dashboard.",
-  "version": "0.2.2",
+  "displayName": "Cursor 子智能体",
+  "description": "把 Cursor CLI 当作子编码智能体来写业务代码：可按任务选模型、会话在 DSH 重启后仍能续聊、返回逐步工具时间线与真实文件 diff，并自带额度/模型/会话面板。",
+  "version": "0.3.0",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",

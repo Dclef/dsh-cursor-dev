@@ -285,6 +285,84 @@ test('a missing slots service degrades to a warning instead of a failed load', (
     assert.match(warnings.join('\n'), /slots service is unavailable/);
 });
 
+/** A probe answer shaped like the host's own `/status` payload. */
+const statusAnswer = body => async () => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
+
+const SETUP = {
+    install: {
+        win32: "irm 'https://cursor.com/install?win32=true' | iex",
+        unix: 'curl https://cursor.com/install -fsS | bash',
+    },
+    login: 'agent login',
+    verify: 'agent status --format json',
+    docs: 'https://cursor.com/docs/cli',
+};
+
+test('a machine without the CLI is told how to install it, not left with dashes', async () => {
+    const react = makeReact();
+    const frame = settingsFrame(react);
+    const connecting = render(frame.type, react, frame.props);
+    assert.equal(connecting.type, 'div', 'the panel connects first');
+    await probe(react, statusAnswer({
+        agent: { found: false, command: '', entry: '', source: '' },
+        auth: { ok: false, installed: false, authenticated: false, error: 'the Cursor CLI was not found' },
+        setup: SETUP,
+    }));
+
+    const element = render(frame.type, react, frame.props);
+    assert.equal(typeof element.type, 'function', 'the setup card is its own component');
+    const card = JSON.stringify(element.type(element.props));
+    assert.match(card, /还没找到 Cursor CLI/);
+    assert.match(card, /cursor\.com\/install\?win32=true/, 'the Windows install command is printed');
+    assert.match(card, /curl https:\/\/cursor\.com\/install -fsS \| bash/, 'so is the Unix one');
+    assert.match(card, /agent login/, 'and the login step that follows it');
+});
+
+test('a CLI that is installed but signed out is told which command to run', async () => {
+    const react = makeReact();
+    const frame = settingsFrame(react);
+    render(frame.type, react, frame.props);
+    await probe(react, statusAnswer({
+        agent: { found: true, command: 'node.exe', entry: 'index.js', source: 'path-cmd' },
+        auth: { ok: false, installed: true, authenticated: false, error: 'Not logged in. Run `agent login`.' },
+        setup: SETUP,
+    }));
+
+    const element = render(frame.type, react, frame.props);
+    const card = JSON.stringify(element.type(element.props));
+    assert.match(card, /Cursor CLI 还没登录/);
+    assert.match(card, /agent login/);
+    assert.match(card, /Not logged in/, 'the CLI\'s own words are shown as the reason');
+    assert.match(card, /agent status --format json/, 'and the command that confirms the fix');
+});
+
+test('the setup card\'s retry asks the host for a fresh sign-in check', async () => {
+    const react = makeReact();
+    const frame = settingsFrame(react);
+    render(frame.type, react, frame.props);
+    await probe(react, statusAnswer({
+        agent: { found: true },
+        auth: { ok: false, installed: true, authenticated: false },
+        setup: SETUP,
+    }));
+
+    const card = render(frame.type, react, frame.props);
+    assert.equal(typeof card.props.onRetry, 'function', 'the setup card offers a retry');
+    card.props.onRetry();
+
+    const connecting = render(frame.type, react, frame.props);
+    assert.equal(connecting.type, 'div', 'retrying goes back to the connecting state');
+
+    const urls = [];
+    await probe(react, async url => {
+        urls.push(url);
+        return { ok: true, status: 200, text: async () => JSON.stringify({ agent: { found: true }, auth: { ok: true, installed: true, authenticated: true } }) };
+    });
+    assert.deepEqual(urls, ['/plugins/dsh-cursor-dev/status?auth=refresh'],
+        'a retry must not meet the host\'s one-minute sign-in cache');
+    assert.equal(render(frame.type, react, frame.props).type, 'iframe', 'once signed in, the dashboard mounts');
+});
+
 test('the manifest declares the client half through a resolvable export', () => {
     assert.equal(manifest.dsh.client.platform, 'web');
     assert.ok(Array.isArray(manifest.dsh.client.inject));
