@@ -562,6 +562,15 @@ test('usage routes register against the host contract and answer HTTP', async ()
         assert.match(dashboard.body, /application\/json/);
         // The panel is Chinese-first and switches to English on request.
         assert.match(dashboard.body, /data-t="/);
+        assert.match(dashboard.body, /data-t="included">总包含额度</, 'the raw markup is Chinese, not an English placeholder');
+        // A dashboard whose own script cannot be parsed is silently inert: the
+        // static markup stays as shipped and every number stays "—" forever,
+        // while the route happily answers 200. `new Function` compiles without
+        // running, which is exactly the check for that.
+        const inline = dashboard.body.match(/<script>([\s\S]*?)<\/script>/g).map(block => block.replace(/^<script>|<\/script>$/g, ''));
+        assert.equal(inline.length, 1, 'the dashboard ships exactly one inline script');
+        assert.doesNotThrow(() => new Function(inline[0]), 'the dashboard script must be syntactically valid JavaScript');
+        assert.equal(dashboard.body.includes("join('\\n')"), true, 'an escaped newline must survive the template');
         const english = await call('/plugins/dsh-cursor-dev/', '/plugins/dsh-cursor-dev/?lang=en');
         assert.match(english.body, /<html lang="en"/);
         const bootstrapEn = JSON.parse(english.body.match(/id="bootstrap">([\s\S]*?)<\/script>/)[1]);
