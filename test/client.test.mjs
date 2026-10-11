@@ -3,10 +3,10 @@
  *
  * The client half is hand-written against the runtime's module loader, so
  * nothing else in the toolchain would notice if its shape drifted: the host
- * would simply never register a Sidebar panel. These tests load the bundle the
- * same way the browser does (`window.__ModuleLoader__.load`), run `apply`
- * against a fake client context, and assert both the descriptor it registers
- * and what the panel renders while it probes the host route.
+ * would simply never register a Sidebar tab or a Settings page. These tests load
+ * the bundle the same way the browser does (`window.__ModuleLoader__.load`), run
+ * `apply` against a fake client context, and assert what it registers and what
+ * the panel renders while it probes the host route.
  */
 
 import { test } from 'node:test';
@@ -88,32 +88,61 @@ function fakeSidebar() {
     };
 }
 
-/** A fake client context that resolves `ctx.inject` and `ctx.effect`. */
-function fakeContext(sidebar) {
-    const warnings = [];
+/** A fake `slots` service recording the seat the panel takes. */
+function fakeSlots() {
+    const calls = { inject: [], register: [] };
+    return {
+        calls,
+        service: {
+            inject(key, callback) {
+                calls.inject.push(key);
+                return callback();
+            },
+            register(options, component) {
+                calls.register.push({ options, component });
+                return () => {};
+            },
+        },
+    };
+}
+
+/** A fake locale service, as the client half reads it. */
+function fakeLocale(active) {
+    return { getLocale: () => ({ active }) };
+}
+
+/**
+ * A fake client context that resolves `ctx.inject` by service name.
+ *
+ * `ctx.inject` waits for a service in the real client context and calls back
+ * with a context that can `get` it; here the wait is immediate and a service
+ * that is absent resolves to `undefined`, which is what the panel must survive.
+ */
+function fakeContext(services = {}) {
     const disposers = [];
+    const injected = [];
     const ctx = {
-        warnings,
         inject(deps, callback) {
-            assert.deepEqual(deps, ['betterSidebar'], 'the panel waits for the sidebar service');
-            const dispose = callback({ get: () => sidebar });
+            injected.push(deps);
+            const dispose = callback({ get: name => services[name] });
             disposers.push(dispose);
             return dispose;
         },
         effect(callback) {
-            disposers.push(callback());
+            const dispose = callback();
+            if (typeof dispose === 'function') disposers.push(dispose);
         },
     };
-    return { ctx, disposers, warnings };
+    return { ctx, disposers, injected };
 }
 
-/** Render the registered panel once, with the hooks of one render pass wired up. */
-function render(descriptor, react) {
+/** Render one component, with the hooks of a fresh render pass wired up. */
+function render(component, react, props = {}) {
     react.hooks.reset();
-    return descriptor.component({ visible: true });
+    return component(props);
 }
 
-/** Run the panel's probe effect against a stub `fetch` and settle its promise chain. */
+/** Run a component's probe effect against a stub `fetch` and settle its promise chain. */
 async function probe(react, implementation) {
     // Hook slots are shared between useState and useEffect, so the effect is the
     // last slot filled by the render pass rather than slot zero.
@@ -129,6 +158,20 @@ async function probe(react, implementation) {
     }
 }
 
+/** The component a probe needs to reach: the frame nested inside the Settings page. */
+function frameOf(page) {
+    assert.equal(page.type, 'div', 'the Settings page is a column');
+    const slot = page.children[page.children.length - 1];
+    const frame = slot.children[0];
+    assert.equal(typeof frame.type, 'function', 'the Settings page mounts the shared frame');
+    return frame;
+}
+
+const REACHABLE = async url => {
+    assert.equal(url, '/plugins/dsh-cursor-dev/status', 'the probe hits the plugin status route');
+    return { ok: true, status: 200, text: async () => '{"ok":true}' };
+};
+
 test('the bundle loads through the runtime module loader', () => {
     const { id, exports } = loadBundle();
     assert.equal(id, 'dsh-cursor-dev', 'the module id must be the package name');
@@ -139,8 +182,7 @@ test('the bundle loads through the runtime module loader', () => {
 test('apply registers one Cursor tab in the sidebar', () => {
     const { exports } = loadBundle();
     const sidebar = fakeSidebar();
-    const { ctx } = fakeContext(sidebar.service);
-    exports.apply(ctx);
+    exports.apply(fakeContext({ betterSidebar: sidebar.service }).ctx);
 
     assert.equal(sidebar.calls.registerTab.length, 1, 'exactly one tab is registered');
     const descriptor = sidebar.calls.registerTab[0];
@@ -151,24 +193,66 @@ test('apply registers one Cursor tab in the sidebar', () => {
     assert.equal(descriptor.title(), 'Cursor');
 });
 
+test('apply registers one Cursor page in Settings, under the native slot name', () => {
+    const { exports } = loadBundle();
+    const slots = fakeSlots();
+    const { ctx } = fakeContext({ slots: slots.service });
+    exports.apply(ctx);
+
+    assert.deepEqual(slots.calls.inject, ['settings.section'], 'a Settings page is a settings.section entry');
+    assert.equal(slots.calls.register.length, 1, 'exactly one Settings page is registered');
+    const { options, component } = slots.calls.register[0];
+    assert.equal(options.name, 'settings.section');
+    assert.equal(options.id, 'dsh-cursor-dev');
+    assert.equal(options.order, 62);
+    assert.equal(typeof options.label, 'function');
+    assert.equal(typeof component, 'function');
+});
+
+test('the Settings label follows the app locale, and defaults to Chinese', () => {
+    const zh = fakeSlots();
+    loadBundle().exports.apply(fakeContext({ slots: zh.service, locale: fakeLocale('zh') }).ctx);
+    assert.equal(zh.calls.register[0].options.label(), 'Cursor 子智能体');
+
+    const en = fakeSlots();
+    loadBundle().exports.apply(fakeContext({ slots: en.service, locale: fakeLocale('en') }).ctx);
+    assert.equal(en.calls.register[0].options.label(), 'Cursor agent');
+});
+
+test('the Settings page embeds the same dashboard, in the app locale', async () => {
+    const react = makeReact();
+    const { exports } = loadBundle({ react: react.api });
+    const slots = fakeSlots();
+    exports.apply(fakeContext({ slots: slots.service, locale: fakeLocale('en') }).ctx);
+    const page = render(slots.calls.register[0].component, react);
+    const frame = frameOf(page);
+
+    const connecting = render(frame.type, react, frame.props);
+    assert.equal(connecting.type, 'div', 'the page reports that it is connecting first');
+
+    await probe(react, REACHABLE);
+    const mounted = render(frame.type, react, frame.props);
+    assert.equal(mounted.type, 'iframe', 'a reachable host route mounts the dashboard');
+    assert.equal(mounted.props.src, '/plugins/dsh-cursor-dev/?lang=en', 'the frame passes the app locale');
+});
+
 test('a reachable host route mounts the dashboard frame', async () => {
     const react = makeReact();
     const { exports } = loadBundle({ react: react.api });
     const sidebar = fakeSidebar();
-    exports.apply(fakeContext(sidebar.service).ctx);
+    exports.apply(fakeContext({ betterSidebar: sidebar.service }).ctx);
     const descriptor = sidebar.calls.registerTab[0];
 
-    let element = render(descriptor, react);
+    const panel = render(descriptor.component, react);
+    assert.equal(typeof panel.type, 'function', 'the tab body renders the shared frame');
+    let element = render(panel.type, react, panel.props);
     assert.equal(element.type, 'div', 'the panel reports that it is connecting first');
 
-    await probe(react, async url => {
-        assert.equal(url, '/plugins/dsh-cursor-dev/status', 'the probe hits the plugin status route');
-        return { ok: true, status: 200, text: async () => '{"ok":true}' };
-    });
+    await probe(react, REACHABLE);
 
-    element = render(descriptor, react);
+    element = render(panel.type, react, panel.props);
     assert.equal(element.type, 'iframe', 'a reachable host route mounts the dashboard');
-    assert.equal(element.props.src, '/plugins/dsh-cursor-dev/', 'the panel shows the dashboard route');
+    assert.equal(element.props.src, '/plugins/dsh-cursor-dev/?lang=zh', 'Chinese is the default the frame asks for');
     assert.equal(element.props.style.width, '100%');
     assert.equal(element.props.style.height, '100%');
 });
@@ -177,11 +261,13 @@ test('an unreachable host route explains itself instead of showing an empty pane
     const react = makeReact();
     const { exports } = loadBundle({ react: react.api });
     const sidebar = fakeSidebar();
-    exports.apply(fakeContext(sidebar.service).ctx);
+    exports.apply(fakeContext({ betterSidebar: sidebar.service }).ctx);
     const descriptor = sidebar.calls.registerTab[0];
 
-    const connecting = render(descriptor, react);
-    assert.equal(connecting.type, 'div', 'the panel reports that it is connecting first');
+    const connecting = render(descriptor.component, react);
+    assert.equal(typeof connecting.type, 'function', 'the tab body renders the shared frame');
+    const first = render(connecting.type, react, connecting.props);
+    assert.equal(first.type, 'div', 'the panel reports that it is connecting first');
 
     await probe(react, async () => ({
         ok: false,
@@ -189,7 +275,7 @@ test('an unreachable host route explains itself instead of showing an empty pane
         text: async () => 'not found',
     }));
 
-    const element = render(descriptor, react);
+    const element = render(connecting.type, react, connecting.props);
     assert.equal(typeof element.type, 'function', 'the offline card is its own component');
     const card = element.type(element.props);
     const text = JSON.stringify(card);
@@ -200,34 +286,31 @@ test('an unreachable host route explains itself instead of showing an empty pane
     await probe(react, async () => {
         throw new Error('boom');
     });
-    const failed = render(descriptor, react);
-    assert.match(JSON.stringify(failed.type(failed.props)), /could not be reached/);
+    const failed = render(connecting.type, react, connecting.props);
+    const failure = JSON.stringify(failed.type(failed.props));
+    assert.match(failure, /连不上宿主路由/, 'a rejected probe is reported as unreachable');
+    assert.match(failure, /boom/, 'the thrown message is shown as the reason');
 });
 
 test('the panel is opened once and only once per install', () => {
     const storage = new Map();
     const first = fakeSidebar();
-    const { ctx: firstCtx } = fakeContext(first.service);
-    loadBundle({ storage }).exports.apply(firstCtx);
+    loadBundle({ storage }).exports.apply(fakeContext({ betterSidebar: first.service }).ctx);
     assert.deepEqual(first.calls.openTab, [{ type: 'cursor-dev', title: 'Cursor' }]);
     assert.equal(storage.get('dsh-cursor-dev:opened-once'), '1');
 
     const second = fakeSidebar();
-    const { ctx: secondCtx } = fakeContext(second.service);
-    loadBundle({ storage }).exports.apply(secondCtx);
+    loadBundle({ storage }).exports.apply(fakeContext({ betterSidebar: second.service }).ctx);
     assert.equal(second.calls.openTab.length, 0, 'a later load must not steal the pane again');
     assert.equal(second.calls.registerTab.length, 1, 'the tab is still registered');
 });
 
-test('a missing sidebar service degrades to a warning', () => {
+test('missing client services degrade to warnings instead of a failed load', () => {
     const { exports, warnings } = loadBundle();
-    const ctx = {
-        inject: (deps, callback) => callback({ get: () => undefined }),
-        effect: () => {},
-    };
-    assert.doesNotThrow(() => exports.apply(ctx));
-    assert.equal(warnings.length, 1);
-    assert.match(warnings[0], /betterSidebar is unavailable/);
+    assert.doesNotThrow(() => exports.apply(fakeContext({}).ctx));
+    assert.equal(warnings.length, 2, 'one warning per absent seat owner');
+    assert.match(warnings.join('\n'), /betterSidebar is unavailable/);
+    assert.match(warnings.join('\n'), /slots service is unavailable/);
 });
 
 test('the manifest declares the client half through a resolvable export', () => {

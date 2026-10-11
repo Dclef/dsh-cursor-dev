@@ -2,7 +2,7 @@
   "name": "dsh-cursor-dev",
   "displayName": "Cursor developer subagent",
   "description": "Run the Cursor CLI as a child coding agent: per-task model choice, conversation continuity across restarts, live progress and real diffs, plus a Cursor usage/quota dashboard.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -22,7 +22,7 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "test": "node --test --test-force-exit test/"
+    "test": "node --test --test-force-exit \"test/**/*.test.mjs\""
   },
   "keywords": [
     "dsh-plugin",

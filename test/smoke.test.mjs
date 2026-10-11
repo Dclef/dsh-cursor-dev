@@ -341,6 +341,7 @@ test('apply() mounts the tool and the HTTP routes against the host contract', as
         assert.deepEqual(routes.map(route => route.path).sort(), [
             '/plugins/dsh-cursor-dev/',
             '/plugins/dsh-cursor-dev/api/journal',
+            '/plugins/dsh-cursor-dev/api/settings',
             '/plugins/dsh-cursor-dev/api/usage',
             '/plugins/dsh-cursor-dev/status',
         ]);
@@ -482,8 +483,15 @@ test('usage routes register against the host contract and answer HTTP', async ()
         const dashboard = await call('/plugins/dsh-cursor-dev/');
         assert.equal(dashboard.status, 200);
         assert.match(dashboard.contentType, /text\/html/);
-        assert.match(dashboard.body, /<title>Cursor usage/);
+        assert.match(dashboard.body, /<title>Cursor<\/title>/);
         assert.match(dashboard.body, /application\/json/);
+        // The panel is Chinese-first and switches to English on request.
+        assert.match(dashboard.body, /data-t="/);
+        const english = await call('/plugins/dsh-cursor-dev/', '/plugins/dsh-cursor-dev/?lang=en');
+        assert.match(english.body, /<html lang="en"/);
+        const bootstrapEn = JSON.parse(english.body.match(/id="bootstrap">([\s\S]*?)<\/script>/)[1]);
+        assert.equal(bootstrapEn.lang, 'en');
+        assert.equal(bootstrapEn.settingsEndpoint, '/plugins/dsh-cursor-dev/api/settings');
         // The embedded bootstrap must be JSON-parseable and must escape `<`.
         const embedded = dashboard.body.match(/id="bootstrap">([\s\S]*?)<\/script>/)[1];
         const parsed = JSON.parse(embedded);
@@ -800,12 +808,28 @@ test('a missing Cursor CLI degrades the tool instead of failing the mount', asyn
     // Everything that does not need the CLI still mounts.
     assert.equal(mounted.length, 1);
     assert.equal(mounted[0].name, 'cursor_code');
-    assert.equal(routes.size, 4, [...routes.keys()].join(', '));
+    assert.equal(routes.size, 5, [...routes.keys()].join(', '));
+    assert.equal(routes.has('/plugins/dsh-cursor-dev/api/settings'), true, 'the model picker mounts without a CLI too');
 
     const failed = await mounted[0].execute({ task: 'do something' },
         { agent: { id: 'p' }, signal: new AbortController().signal });
     assert.equal(failed.ok, false);
     assert.match(failed.error, /could not find the Cursor CLI/);
+
+    // The settings route must answer with the reason the picker is empty
+    // instead of failing the request.
+    const settings = routes.get('/plugins/dsh-cursor-dev/api/settings');
+    const settingsChunks = [];
+    let settingsCode;
+    await settings.handler({ method: 'GET', url: '/plugins/dsh-cursor-dev/api/settings' }, {
+        writeHead: value => { settingsCode = value; },
+        end: body => { settingsChunks.push(body); },
+    });
+    assert.equal(settingsCode, 200);
+    const settingsBody = JSON.parse(settingsChunks.join(''));
+    assert.equal(settingsBody.models.ok, false);
+    assert.match(settingsBody.models.error, /Cursor CLI is not available/);
+    assert.equal(settingsBody.effectiveModel, '');
 
     // The status route must answer rather than throw on a missing agent.
     const status = routes.get('/plugins/dsh-cursor-dev/status');
