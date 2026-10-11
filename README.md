@@ -16,7 +16,7 @@
 - **真正的续聊** —— `continueSession: true` 复用同一个 Cursor 会话。进程被回收、**甚至 DSH 重启之后也还记得**：会话会从 Cursor 自己的会话库里 `session/load` 回来。
 - **看得见** —— 每次调用都返回**逐步工具时间线**和**真实文件 diff**（`{oldText,newText}`），UI 里直接渲染成一张 diff 卡片，而不是让你相信一段总结。
 - **独立证据** —— 回合前后各做一次文件指纹，**shell 命令写出来的文件也跑不掉**（这类改动根本不在 ACP 流里）；ACP diff 与指纹结果合并成一份变更清单。
-- **额度、模型与会话都在面板里** —— 不用问模型：额度用量、当前活着的会话、每个会话在干什么、以及**它到底跑了哪几次会话**（点会话键展开逐步日志）。面板默认中文，右上角一键切 English；右侧边栏有标签页，**设置 → Cursor 子智能体**里也有一份。
+- **额度、模型与会话都在面板里** —— 不用问模型：额度用量、当前活着的会话、每个会话在干什么、以及**它到底跑了哪几次会话**（点会话键展开逐步日志）。面板默认中文，右上角一键切 English，位置就一个：**设置 → Cursor 子智能体**。
 
 ### 安装
 
@@ -85,7 +85,7 @@ dsh plugin add dsh-cursor-dev
 
 ### 面板：额度、模型与会话
 
-Cursor 没有任何 CLI 命令能查额度，所以插件自己调它的 dashboard RPC 并把结果 host 起来。同一个页面出现在两个位置：**右侧边栏的 `Cursor` 标签页**，以及 **设置 → Cursor 子智能体**。
+Cursor 没有任何 CLI 命令能查额度，所以插件自己调它的 dashboard RPC 并把结果 host 起来。页面是 **设置 → Cursor 子智能体**。
 
 页面默认中文（跟随 DSH 的语言设置），右上角 `中文 / English` 一键切换，选择记在本机、也会写回插件设置。
 
@@ -122,7 +122,7 @@ Cursor 没有任何 CLI 命令能查额度，所以插件自己调它的 dashboa
 npm test        # node --test --test-force-exit "test/**/*.test.mjs"
 ```
 
-53 个测试、4 个文件，**不需要 DSH**：真实的 Cursor CLI 加上真实插件模块，覆盖模型切换、`continueSession` 复用、**新进程 `session/load` 后仍能记起自己写过什么**、真实 diff、坏模型报错、额度 RPC 及其降级、把路由挂到真实 HTTP 服务上跑一遍、「找不到 CLI 时插件照样挂载、只有工具报错」，以及面板这一侧：模型列表解析与缓存、设置的读/合并/原子写、面板选择与 profile 配置的优先级、`settings` 路由的行为，还有浏览器半边注册的边栏标签页与设置页。
+53 个测试、4 个文件，**不需要 DSH**：真实的 Cursor CLI 加上真实插件模块，覆盖模型切换、`continueSession` 复用、**新进程 `session/load` 后仍能记起自己写过什么**、真实 diff、坏模型报错、额度 RPC 及其降级、把路由挂到真实 HTTP 服务上跑一遍、「**webServer 还没就绪时一条路由都不许挂、就绪后五条全挂上**」、「找不到 CLI 时插件照样挂载、只有工具报错」，以及面板这一侧：模型列表解析与缓存、设置的读/合并/原子写、面板选择与 profile 配置的优先级、`settings` 路由的行为，还有浏览器半边注册的设置页（含**开机竞态**的回归测试）。
 
 ---
 
@@ -138,7 +138,7 @@ It gives the model you chat with one more tool: **`cursor_code`**. That model th
 - **Continue a conversation for real** — `continueSession: true` reuses the same Cursor session, and it still remembers after the process is reaped or **DSH restarts** (reloaded from Cursor's own session store via `session/load`).
 - **Show its work** — every call returns a per-step tool timeline and the real `{oldText, newText}` file diffs, rendered as a diff card in the UI.
 - **Verify independently** — a filesystem fingerprint before and after the turn catches changes the ACP stream never mentioned (shell writes, moves, deletes).
-- **Report quota, model and sessions** — a self-contained panel, with no model tokens spent: usage buckets, the live sessions with what each one is doing right now, every durable conversation (**click a key for its step-by-step journal**), and the picker for the model the child runs on. It is Chinese by default with a one-click English switch, and it is reachable from two places: the right Sidebar's `Cursor` tab and **Settings → Cursor child agent**.
+- **Report quota, model and sessions** — a self-contained panel, with no model tokens spent: usage buckets, the live sessions with what each one is doing right now, every durable conversation (**click a key for its step-by-step journal**), and the picker for the model the child runs on. It is Chinese by default with a one-click English switch, and it lives in **Settings → Cursor child agent**.
 
 ### Requirements
 

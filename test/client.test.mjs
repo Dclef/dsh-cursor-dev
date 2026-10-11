@@ -3,10 +3,10 @@
  *
  * The client half is hand-written against the runtime's module loader, so
  * nothing else in the toolchain would notice if its shape drifted: the host
- * would simply never register a Sidebar tab or a Settings page. These tests load
- * the bundle the same way the browser does (`window.__ModuleLoader__.load`), run
- * `apply` against a fake client context, and assert what it registers and what
- * the panel renders while it probes the host route.
+ * would simply never register a Settings page. These tests load the bundle the
+ * same way the browser does (`window.__ModuleLoader__.load`), run `apply`
+ * against a fake client context, and assert what it registers and what the page
+ * renders while it probes the host route.
  */
 
 import { test } from 'node:test';
@@ -46,7 +46,7 @@ function makeReact() {
 }
 
 /** Evaluate the bundle against a fake loader and capture what it registers. */
-function loadBundle({ storage = new Map(), react = makeReact().api } = {}) {
+function loadBundle({ react = makeReact().api } = {}) {
     let loaded;
     const warnings = [];
     const window = {
@@ -54,10 +54,6 @@ function loadBundle({ storage = new Map(), react = makeReact().api } = {}) {
             load: module => {
                 loaded = module;
             },
-        },
-        localStorage: {
-            getItem: key => (storage.has(key) ? storage.get(key) : null),
-            setItem: (key, value) => storage.set(key, value),
         },
     };
     const console = { warn: (...args) => warnings.push(args.join(' ')), error: () => {} };
@@ -71,21 +67,6 @@ function loadBundle({ storage = new Map(), react = makeReact().api } = {}) {
         return react;
     };
     return { id: loaded.id, exports: factory(require), warnings };
-}
-
-/** A fake `betterSidebar` service recording what the panel asked for. */
-function fakeSidebar() {
-    const calls = { registerTab: [], openTab: [] };
-    return {
-        calls,
-        service: {
-            registerTab: descriptor => {
-                calls.registerTab.push(descriptor);
-                return () => {};
-            },
-            openTab: descriptor => calls.openTab.push(descriptor),
-        },
-    };
 }
 
 /** A fake `slots` service recording the seat the panel takes. */
@@ -116,7 +97,9 @@ function fakeLocale(active) {
  *
  * `ctx.inject` waits for a service in the real client context and calls back
  * with a context that can `get` it; here the wait is immediate and a service
- * that is absent resolves to `undefined`, which is what the panel must survive.
+ * that is absent resolves to `undefined`, which is what the page must survive.
+ * `depsOf` records which services were asked for, so a seat that must not come
+ * back (the retired Sidebar tab) can be asserted absent.
  */
 function fakeContext(services = {}) {
     const disposers = [];
@@ -167,6 +150,14 @@ function frameOf(page) {
     return frame;
 }
 
+/** Mount the Settings page and hand back its frame, ready to render or probe. */
+function settingsFrame(react, services = {}) {
+    const { exports } = loadBundle({ react: react.api });
+    const slots = fakeSlots();
+    exports.apply(fakeContext({ slots: slots.service, ...services }).ctx);
+    return frameOf(render(slots.calls.register[0].component, react));
+}
+
 const REACHABLE = async url => {
     assert.equal(url, '/plugins/dsh-cursor-dev/status', 'the probe hits the plugin status route');
     return { ok: true, status: 200, text: async () => '{"ok":true}' };
@@ -177,20 +168,6 @@ test('the bundle loads through the runtime module loader', () => {
     assert.equal(id, 'dsh-cursor-dev', 'the module id must be the package name');
     assert.equal(typeof exports.apply, 'function');
     assert.ok(Array.isArray(exports.inject), 'inject must be an array');
-});
-
-test('apply registers one Cursor tab in the sidebar', () => {
-    const { exports } = loadBundle();
-    const sidebar = fakeSidebar();
-    exports.apply(fakeContext({ betterSidebar: sidebar.service }).ctx);
-
-    assert.equal(sidebar.calls.registerTab.length, 1, 'exactly one tab is registered');
-    const descriptor = sidebar.calls.registerTab[0];
-    assert.equal(descriptor.id, 'cursor-dev');
-    assert.equal(typeof descriptor.component, 'function', 'the descriptor carries a render function');
-    assert.equal(descriptor.hidden, false, 'the tab must be visible in the picker');
-    assert.equal(typeof descriptor.title, 'function');
-    assert.equal(descriptor.title(), 'Cursor');
 });
 
 test('apply registers one Cursor page in Settings, under the native slot name', () => {
@@ -219,13 +196,32 @@ test('the Settings label follows the app locale, and defaults to Chinese', () =>
     assert.equal(en.calls.register[0].options.label(), 'Cursor agent');
 });
 
-test('the Settings page embeds the same dashboard, in the app locale', async () => {
+test('the retired right-Sidebar tab is not registered any more', () => {
+    const { exports, warnings } = loadBundle();
+    const calls = { registerTab: [], openTab: [] };
+    const sidebar = {
+        registerTab: descriptor => {
+            calls.registerTab.push(descriptor);
+            return () => {};
+        },
+        openTab: descriptor => calls.openTab.push(descriptor),
+    };
+    const { ctx, injected } = fakeContext({ slots: fakeSlots().service, betterSidebar: sidebar });
+    exports.apply(ctx);
+
+    assert.equal(calls.registerTab.length, 0, 'the panel lives in Settings only');
+    assert.equal(calls.openTab.length, 0, 'nothing may steal the right pane on load');
+    assert.equal(
+        injected.some(deps => deps.includes('betterSidebar')),
+        false,
+        'the sidebar host must not be a dependency of this plugin any more',
+    );
+    assert.equal(warnings.length, 0, 'a present-but-unused sidebar service is not worth a warning');
+});
+
+test('the Settings page embeds the dashboard, in the app locale', async () => {
     const react = makeReact();
-    const { exports } = loadBundle({ react: react.api });
-    const slots = fakeSlots();
-    exports.apply(fakeContext({ slots: slots.service, locale: fakeLocale('en') }).ctx);
-    const page = render(slots.calls.register[0].component, react);
-    const frame = frameOf(page);
+    const frame = settingsFrame(react, { locale: fakeLocale('en') });
 
     const connecting = render(frame.type, react, frame.props);
     assert.equal(connecting.type, 'div', 'the page reports that it is connecting first');
@@ -238,19 +234,14 @@ test('the Settings page embeds the same dashboard, in the app locale', async () 
 
 test('a reachable host route mounts the dashboard frame', async () => {
     const react = makeReact();
-    const { exports } = loadBundle({ react: react.api });
-    const sidebar = fakeSidebar();
-    exports.apply(fakeContext({ betterSidebar: sidebar.service }).ctx);
-    const descriptor = sidebar.calls.registerTab[0];
+    const frame = settingsFrame(react);
 
-    const panel = render(descriptor.component, react);
-    assert.equal(typeof panel.type, 'function', 'the tab body renders the shared frame');
-    let element = render(panel.type, react, panel.props);
-    assert.equal(element.type, 'div', 'the panel reports that it is connecting first');
+    let element = render(frame.type, react, frame.props);
+    assert.equal(element.type, 'div', 'the page reports that it is connecting first');
 
     await probe(react, REACHABLE);
 
-    element = render(panel.type, react, panel.props);
+    element = render(frame.type, react, frame.props);
     assert.equal(element.type, 'iframe', 'a reachable host route mounts the dashboard');
     assert.equal(element.props.src, '/plugins/dsh-cursor-dev/?lang=zh', 'Chinese is the default the frame asks for');
     assert.equal(element.props.style.width, '100%');
@@ -259,15 +250,10 @@ test('a reachable host route mounts the dashboard frame', async () => {
 
 test('an unreachable host route explains itself instead of showing an empty pane', async () => {
     const react = makeReact();
-    const { exports } = loadBundle({ react: react.api });
-    const sidebar = fakeSidebar();
-    exports.apply(fakeContext({ betterSidebar: sidebar.service }).ctx);
-    const descriptor = sidebar.calls.registerTab[0];
+    const frame = settingsFrame(react);
 
-    const connecting = render(descriptor.component, react);
-    assert.equal(typeof connecting.type, 'function', 'the tab body renders the shared frame');
-    const first = render(connecting.type, react, connecting.props);
-    assert.equal(first.type, 'div', 'the panel reports that it is connecting first');
+    const connecting = render(frame.type, react, frame.props);
+    assert.equal(connecting.type, 'div', 'the page reports that it is connecting first');
 
     await probe(react, async () => ({
         ok: false,
@@ -275,7 +261,7 @@ test('an unreachable host route explains itself instead of showing an empty pane
         text: async () => 'not found',
     }));
 
-    const element = render(connecting.type, react, connecting.props);
+    const element = render(frame.type, react, frame.props);
     assert.equal(typeof element.type, 'function', 'the offline card is its own component');
     const card = element.type(element.props);
     const text = JSON.stringify(card);
@@ -286,30 +272,16 @@ test('an unreachable host route explains itself instead of showing an empty pane
     await probe(react, async () => {
         throw new Error('boom');
     });
-    const failed = render(connecting.type, react, connecting.props);
+    const failed = render(frame.type, react, frame.props);
     const failure = JSON.stringify(failed.type(failed.props));
     assert.match(failure, /连不上宿主路由/, 'a rejected probe is reported as unreachable');
     assert.match(failure, /boom/, 'the thrown message is shown as the reason');
 });
 
-test('the panel is opened once and only once per install', () => {
-    const storage = new Map();
-    const first = fakeSidebar();
-    loadBundle({ storage }).exports.apply(fakeContext({ betterSidebar: first.service }).ctx);
-    assert.deepEqual(first.calls.openTab, [{ type: 'cursor-dev', title: 'Cursor' }]);
-    assert.equal(storage.get('dsh-cursor-dev:opened-once'), '1');
-
-    const second = fakeSidebar();
-    loadBundle({ storage }).exports.apply(fakeContext({ betterSidebar: second.service }).ctx);
-    assert.equal(second.calls.openTab.length, 0, 'a later load must not steal the pane again');
-    assert.equal(second.calls.registerTab.length, 1, 'the tab is still registered');
-});
-
-test('missing client services degrade to warnings instead of a failed load', () => {
+test('a missing slots service degrades to a warning instead of a failed load', () => {
     const { exports, warnings } = loadBundle();
     assert.doesNotThrow(() => exports.apply(fakeContext({}).ctx));
-    assert.equal(warnings.length, 2, 'one warning per absent seat owner');
-    assert.match(warnings.join('\n'), /betterSidebar is unavailable/);
+    assert.equal(warnings.length, 1, 'one warning for the absent seat owner');
     assert.match(warnings.join('\n'), /slots service is unavailable/);
 });
 

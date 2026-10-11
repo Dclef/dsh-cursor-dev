@@ -297,7 +297,10 @@ test('apply() mounts the tool and the HTTP routes against the host contract', as
     const dataDir = await mkdtemp(join(tmpdir(), 'dsh-mount-data-'));
     const routes = [];
     const disposers = [];
+    const injected = [];
     let registered;
+
+    const server = { register: (route) => { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1); }; } };
 
     /** Minimal stand-in for the host services `apply` touches. */
     const ctx = {
@@ -305,11 +308,18 @@ test('apply() mounts the tool and the HTTP routes against the host contract', as
         tools: { register: (definition) => { registered = definition; return () => { registered = undefined; }; } },
         subprocess: { spawn: testSpawn },
         get: (name) => {
-            if (name === 'webServer') {
-                return { register: (route) => { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1); }; } };
-            }
+            if (name === 'webServer') return server;
             if (name === 'baseDir') return dataDir;
             return undefined;
+        },
+        // `webServer` is resolved inside its own dependency scope; Cordis invokes
+        // this once the service is active, and so does this fake.
+        inject: (deps, callback) => {
+            injected.push(deps);
+            return callback({
+                get: (name) => (name === 'webServer' ? server : undefined),
+                effect: (factory) => { const dispose = factory(); disposers.push(dispose); return () => {}; },
+            });
         },
         effect: (factory) => { const dispose = factory(); disposers.push(dispose); return () => {}; },
     };
@@ -337,6 +347,9 @@ test('apply() mounts the tool and the HTTP routes against the host contract', as
         assert.equal(typeof registered.execute, 'function');
         assert.equal(registered.isConcurrencySafe({ task: 'x' }), false);
 
+        // The HTTP surfaces ask for the service instead of racing it.
+        assert.deepEqual(injected, [['webServer']], 'the routes declare webServer as a dependency');
+
         // The reporting surfaces, by exact path.
         assert.deepEqual(routes.map(route => route.path).sort(), [
             '/plugins/dsh-cursor-dev/',
@@ -354,6 +367,68 @@ test('apply() mounts the tool and the HTTP routes against the host contract', as
         for (const dispose of disposers)
             if (typeof dispose === 'function')
                 dispose();
+        await safeRemove(dataDir);
+    }
+});
+
+// The regression this plugin shipped with: at boot its fiber activated while the
+// web server's asynchronous listen was still pending, `ctx.get('webServer')`
+// answered `undefined` (Cordis only hands out a service whose provider is
+// ACTIVE), and every route was skipped while the tool kept working — a plugin
+// that looked enabled and answered 404 everywhere.
+test('the HTTP routes wait for webServer, and are never registered without it', async () => {
+    const plugin = await import('../lib/index.js');
+    const dataDir = await mkdtemp(join(tmpdir(), 'dsh-mount-late-'));
+    const routes = [];
+    const disposers = [];
+    const activations = [];
+    const injected = [];
+    let registered;
+    let webServer;
+
+    const webCtx = {
+        get: (name) => (name === 'webServer' ? webServer : undefined),
+        effect: (factory) => { const dispose = factory(); if (typeof dispose === 'function') disposers.push(dispose); return () => {}; },
+    };
+    const ctx = {
+        logger: { info: () => {}, warn: () => {}, error: () => {} },
+        tools: { register: (definition) => { registered = definition; return () => { registered = undefined; }; } },
+        subprocess: { spawn: testSpawn },
+        // Exactly the boot-time state that hid the whole HTTP surface: the
+        // providing fiber is not active yet, so a strict `get` answers undefined.
+        get: (name) => (name === 'baseDir' ? dataDir : undefined),
+        inject: (deps, callback) => { injected.push(deps); activations.push(callback); return () => {}; },
+        effect: (factory) => { const dispose = factory(); disposers.push(dispose); return () => {}; },
+    };
+
+    try {
+        plugin.apply(ctx, new plugin.Config({}));
+
+        // The coding tool must not depend on the web server.
+        assert.equal(registered.name, 'cursor_code', 'the tool mounts even with no web server in sight');
+        assert.deepEqual(injected, [['webServer']], 'the HTTP surfaces ask for webServer');
+        assert.equal(activations.length, 1, 'exactly one deferred activation is handed to Cordis');
+        assert.equal(routes.length, 0, 'no route may be registered before the service exists');
+
+        // Cordis activates the scope once the service is ready.
+        webServer = { register: (route) => { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1); }; } };
+        activations[0](webCtx);
+
+        assert.deepEqual(routes.map(route => route.path).sort(), [
+            '/plugins/dsh-cursor-dev/',
+            '/plugins/dsh-cursor-dev/api/journal',
+            '/plugins/dsh-cursor-dev/api/settings',
+            '/plugins/dsh-cursor-dev/api/usage',
+            '/plugins/dsh-cursor-dev/status',
+        ], 'every route appears once the service is active');
+
+        // A host that never provides the service leaves the tool alone.
+        for (const dispose of disposers)
+            if (typeof dispose === 'function')
+                dispose();
+        assert.equal(routes.length, 0, 'disposal releases every route');
+    }
+    finally {
         await safeRemove(dataDir);
     }
 });
@@ -778,15 +853,16 @@ test('a missing Cursor CLI degrades the tool instead of failing the mount', asyn
     const routes = new Map();
     const mounted = [];
     const warnings = [];
+    const server = { register: route => { routes.set(route.path, route); return () => routes.delete(route.path); } };
     const ctx = {
         logger: { info: () => {}, warn: message => warnings.push(String(message)), error: () => {} },
         tools: { register: definition => { mounted.push(definition); return () => {}; } },
         subprocess: { spawn: () => { throw new Error('must not spawn without a CLI'); } },
-        get: name => {
-            if (name === 'webServer')
-                return { register: route => { routes.set(route.path, route); return () => routes.delete(route.path); } };
-            return name === 'baseDir' ? dataDir : undefined;
-        },
+        get: name => (name === 'baseDir' ? dataDir : undefined),
+        inject: (deps, callback) => callback({
+            get: name => (name === 'webServer' ? server : undefined),
+            effect: factory => { factory(); return () => {}; },
+        }),
         effect: () => {},
     };
     const plugin = await import('../lib/index.js');
