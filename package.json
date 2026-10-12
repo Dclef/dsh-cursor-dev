@@ -2,7 +2,7 @@
   "name": "dsh-cursor-dev",
   "displayName": "Cursor 子智能体",
   "description": "把 Cursor CLI 当作子编码智能体来写业务代码：可按任务选模型、会话在 DSH 重启后仍能续聊、返回逐步工具时间线与真实文件 diff，并自带额度/模型/会话面板。",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",

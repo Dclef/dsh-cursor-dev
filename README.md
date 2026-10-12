@@ -83,6 +83,15 @@ dsh plugin add dsh-cursor-dev
 - 跑完告诉我改了哪些文件
 ```
 
+懒得写整句，就用命令（可选）：
+
+```text
+/cursor-subagent 给这个工作区加一个「导出 CSV」的功能，入口 src/export/csv.ts
+/cursor-subagent -m grok-4.7-xhigh 先出一份重构方案，别改文件
+```
+
+在输入框打 `/` 就能看到它。**分工是固定的：命令直接把活儿派给 Cursor 子智能体去写**——不进模型历史，也不先问父模型要不要做这件事，所以不会出现「父模型自己把代码写了」；Cursor 写完后，插件把结果（改了哪些文件、+/- 多少行、用的哪个模型、它自己的说明）作为一条普通消息发给父模型，由**父模型审查**这些代码：核对 diff、跑测试、按验收标准验证。发现问题再用 `cursor_code` 带 `continueSession: true` 让它接着改（还是同一个 Cursor 会话，它记得自己写过什么）。`-m` 只覆盖这一次调用的模型，不写就用面板里设的默认。
+
 ### 它凭什么比「让模型自己写」靠谱
 
 - **看得见它干了什么** —— 每次调用都返回逐步的工具时间线和**真实文件 diff**（改前/改后原文），UI 里直接渲染成 diff 卡片。不是让你相信一段总结。
@@ -97,7 +106,7 @@ dsh plugin add dsh-cursor-dev
 ![设置里的 Cursor 子智能体](screenshots/panel-zh-settings.png)
 
 - **额度** —— 包含额度、Auto 桶、API 桶、本期花费、计费周期，30 秒自动刷新。
-- **子智能体模型** —— 下拉列出 CLI 报出的全部模型，点保存就生效，**下一次调用就用它**，不用重启。留空 = 跟随 CLI 默认（Auto）。
+- **子智能体模型** —— 下拉列的是**会话真实接受的 id**（ACP 会话目录优先，拿不到才退到 CLI 的 `--list-models` 别名列表），点保存就生效，**下一次调用就用它**，不用重启。留空 = 跟随 CLI 默认（Auto → `default[]`）。账户不提供的模型会被标成不可用，而不是让整轮调用失败。
 - **会话** —— 上半张表是当前活着的进程（会话 id、模型、模式、回合数、**正在干什么**）；下半张表是历史会话。**点会话键**展开那一轮的执行日志：任务、模型、逐步时间线。
 
 额度数据是从本机 Cursor 自己的凭据（`%APPDATA%\Cursor\auth.json`）只读调它的 dashboard RPC 拿的，**token 不会被记录、不会出现在任何响应里**。你也可以直接开 <http://127.0.0.1:19387/plugins/dsh-cursor-dev/> 看同一个页面（DSH 桌面版运行时）。
@@ -121,6 +130,15 @@ dsh plugin add dsh-cursor-dev
 返回：`ok`、`cursorSessionId`、`reused` / `reloaded`、`model`、`mode`、`stopReason`、`durationMs`、`text`（子智能体的最终消息）、`steps`（工具时间线）、`changes`（变更清单，标注 `source: "acp" | "fs"` 和 `operation`）、`preview`（真实 `{path, oldText, newText}`）、`reasoning`、`error`。
 
 **该用它就别客气**（真正落地的实现工作：写/重构代码、修 bug、加测试、跨文件机械改动）；**不该用它就别浪费**（能自己回答的问题、读文件——用你自己的工具）。
+
+### 让它进 Agent Teams 干活
+
+`cursor_code` 是普通工具，所以 Agent Teams 里的任何成员都能叫它——把 Cursor 当**团队里那只便宜的代码手**用：
+
+- **同一条工作线用同一个 `sessionLabel`** —— 队友甲用 `"auth"`，队友乙用 `"ui"`，两个人的上下文就不会互相污染（会话键是 `标签 + 工作目录`）。
+- **要接着上一轮改，就 `continueSession: true`** —— Cursor 自己记住它已经改了哪几个文件；换了个模型再续（比如从 `composer-2.5` 换到 `kimi-k3`）会被识别成「换模型」，自动开新会话，不会把上一代的上下文带过去。
+- **一个成员一个工作目录/一棵文件树** —— 池里的回合是串行跑的，同一棵树里两个人同时改还是会让 diff 互相交叠；用 `workspaceRoot` 或各自的分支把写范围分开。
+- **派活的活交给父模型** —— 验收标准（哪些文件、什么算「做完」）写进 `acceptance`，子智能体看不到你的对话，`task` 是它唯一的输入。
 
 ### 配置
 
@@ -146,6 +164,8 @@ dsh plugin add dsh-cursor-dev
 ### 几个坑（提前说清楚）
 
 - **Cursor CLI 的模型是全局的，不是按会话的**（实测：在 A 会话切模型，没碰过的 B 会话也会变，而且跨进程、跨重启留着）。所以本插件的调用是**串行**的，免得切模型污染另一条工作线。
+- **两个模型 id 命名空间，别混着用**（这就是「面板选了模型结果整轮调用失败」的老 bug）：`cursor-agent --list-models` 印的是**别名**（`auto`、`composer-2.5`、`kimi-k3-max`、`glm-5.2-high`、`cursor-grok-4.6-high`…），而 `session/set_config_option` 只认**带参数的 id**（`default[]`、`composer-2.5[fast=true]`、`kimi-k3[reasoning=max]`、`glm-5.2[reasoning=high]`、`grok-4.6[effort=high,fast=true]`…）。插件现在一律拿面板/参数里的选择去会话自己的目录里解析，把别名映射成会话接受的 id，参数缺失时按基名重试一次，解析不出来就在**调用前**报 `cursor/model-unknown` 并列出可用的 id。
+- **档位是 id 的一部分，不是每个模型都真有那么多档** —— CLI 列的 `grok-4.7-low/-medium/-high/-xhigh` 在当前账户里都指向同一个 `grok-4.7[context=256k,reasoning_effort=high,fast=true]`；面板显示的是**会话目录**里的那 10 个 id，别指望别名能变出账号没有的档位。
 - Windows 上被回收的 Cursor 子进程可能短暂占着工作目录（`EBUSY`），测试里已做重试。
 - 会话至少跑完一个回合才会被 Cursor 落盘，在那之前 `session/load` 会报 `Session not found`；本插件只在确实存在过会话时才去 load。
 
@@ -155,7 +175,7 @@ dsh plugin add dsh-cursor-dev
 npm test        # node --test --test-force-exit "test/**/*.test.mjs"
 ```
 
-74 个测试、6 个文件，**不需要 DSH**：真实的 Cursor CLI + 真实插件模块，覆盖模型切换、`continueSession` 复用、**新进程 `session/load` 后仍记得自己写过什么**、真实 diff、坏模型报错、额度 RPC 及其降级、把路由挂到真实 HTTP 服务上跑一遍、「**webServer 还没就绪时一条路由都不许挂、就绪后五条全挂上**」、「找不到 CLI 时插件照样挂载、只有工具报错」、返回值必须能无损序列化（否则一次成功的运行会被宿主当成失败丢掉），以及面板这一侧：模型列表解析与缓存、设置的读/合并/原子写、面板选择与 profile 配置的优先级、`settings` 路由、`agent status --format json` 的登录状态解析与 60 秒缓存（含超时与未登录两种降级），还有浏览器半边的设置页与新装引导卡片（含**开机竞态**的回归测试）。
+114 个测试、9 个文件，**不需要 DSH**：真实的 Cursor CLI + 真实插件模块，覆盖模型切换、两个模型 id 命名空间（`auto` ⇄ `default[]`、别名 ⇄ 带参数的 id）之间的解析与比较、CLI 列表里带 `cursor-` 工作区前缀的别名到会话清单 id 的映射、`probeModelRoster` 会话清单与 `--list-models` 别名列表的来源优先级、**续聊判定说同一种模型（别名与它的带参数 id 算同一个，真换模型才开新会话）**、`continueSession` 复用、**新进程 `session/load` 后仍记得自己写过什么**、真实 diff、坏模型报错、额度 RPC 及其降级、把路由挂到真实 HTTP 服务上跑一遍、「**webServer 还没就绪时一条路由都不许挂、就绪后五条全挂上**」、「找不到 CLI 时插件照样挂载、只有工具报错」、返回值必须能无损序列化（否则一次成功的运行会被宿主当成失败丢掉）、`/cursor-subagent` 命令（注册形状、任务与 `-m` 的拆分、空任务只报用法、**命令自己把活派给子智能体而不是先问父模型**、跑完把「改了哪些文件/用的哪个模型/它自己的说明」交给父模型审查、运行失败也变成一条消息而不是消失），以及面板这一侧：模型列表解析与缓存、设置的读/合并/原子写、面板选择与 profile 配置的优先级、`settings` 路由、`agent status --format json` 的登录状态解析与 60 秒缓存（含超时与未登录两种降级），还有浏览器半边的设置页与新装引导卡片（含**开机竞态**的回归测试）。
 
 ---
 
@@ -208,6 +228,15 @@ On the desktop app (no `dsh` CLI), register it in your profile: add `"dsh-cursor
 | Point it at files | "Have it read `src/a.ts` first" (`contextFiles`) |
 | Watch it work | Open **Settings → Cursor child agent** |
 
+Or use the command, if you would rather not write the sentence:
+
+```text
+/cursor-subagent add a CSV export to this workspace, entry point src/export/csv.ts
+/cursor-subagent -m grok-4.7-xhigh propose a refactor plan, do not edit files
+```
+
+Type `/` to find it. The division of labour is fixed: **the command dispatches straight to the Cursor child** — nothing enters model history and the parent model is never asked whether to delegate, so it cannot end up writing the code itself. When Cursor is done, the plugin sends the outcome (files changed, +/- counts, the model that ran, the child's own summary) to the parent as one ordinary message so the **parent reviews** the work: check the diff, run the tests, then ask for another pass with `cursor_code` + `continueSession: true` (same Cursor conversation). `-m` overrides the model for that run; without it the panel's default applies.
+
 ### Why it beats "just let the model write it"
 
 Every call returns a step-by-step tool timeline and the **real `{oldText, newText}` diffs**, rendered as a diff card — you verify, you don't trust a summary. A filesystem fingerprint before and after the turn catches changes the ACP stream never mentions (shell writes, moves, deletes). `continueSession: true` keeps the same Cursor conversation, and it survives a process reap **and a DSH restart** (`session/load`). Models are picked per job, or once in the panel.
@@ -218,14 +247,20 @@ The panel (**Settings → Cursor child agent**, Chinese by default with a one-cl
 
 `task` (required, the child sees only this), `contextFiles`, `acceptance`, `model`, `mode` (`agent` / `plan` / `ask`), `continueSession`, `sessionLabel`, `resetSession`, `workspaceRoot`, `report` (`summary` / `detailed`), `timeoutSeconds` (default 1800, max 7200). Use it for real implementation work; use your own tools for reading files and answering questions.
 
+### Using it inside Agent Teams
+
+`cursor_code` is an ordinary tool, so any team member can call it — the cheap pair of hands that writes while the parent model and its teammates plan and review. Give each work line its own `sessionLabel` (the key is `label + working directory`) so two teammates never share one Cursor context; pass `continueSession: true` to keep editing the same conversation, and know that switching to a genuinely different model opens a fresh generation on purpose instead of inheriting the old one. Turns are serialized across the pool (the CLI's model is global — see Notes), so keep teammates in separate working directories or write scopes; serialization removes the model race, not the file-level overlap.
+
 ### Notes
 
 The Cursor CLI applies the model **globally**, not per session, so this plugin serializes turns to keep a model switch from affecting another work line. Panel choices are stored in the plugin's own data directory (`%LOCALAPPDATA%\dsh-cursor-dev`), never in your profile config, and take effect on the next call. Routes: `/plugins/dsh-cursor-dev/` (dashboard), `/api/usage`, `/api/journal`, `/api/settings` (the only writable one) and `/status`.
 
+Two model-id name spaces exist and must not be confused (this is the old "the panel had a model selected and the whole call failed" bug): `cursor-agent --list-models` prints **aliases** (`auto`, `composer-2.5`, `kimi-k3-max`, `glm-5.2-high`, `cursor-grok-4.6-high`, …), while `session/set_config_option` accepts only **parameterised ids** (`default[]`, `composer-2.5[fast=true]`, `kimi-k3[reasoning=max]`, `glm-5.2[reasoning=high]`, `grok-4.6[effort=high,fast=true]`, …). The plugin resolves every choice through the session's own roster, retries once by base name when the roster carries no parameters, and fails **before** the call with `cursor/model-unknown` plus the list of usable ids.
+
 ### Development
 
 ```bash
-npm test        # 74 tests, 6 files, no DSH required
+npm test        # 114 tests, 9 files, no DSH required
 ```
 
 ## License

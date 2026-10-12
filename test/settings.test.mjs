@@ -406,6 +406,57 @@ test('without a web server the plugin still loads', () => {
     assert.equal(registerSettingsRoutes(ctx, {}), undefined);
 });
 
+test('the ACP roster is preferred over the CLI listing, and the source is reported', async () => {
+    await withDataDir(async (dir) => {
+        const spawn = fakeSpawn({ stdout: LISTING });
+        const probeModelRoster = async () => ({
+            ok: true,
+            list: [
+                { id: 'default[]', name: 'Auto', current: true, isDefault: true },
+                { id: 'composer-2.5[fast=true]', name: 'Composer 2.5', current: false, isDefault: false },
+            ],
+        });
+
+        const answered = await modelsFor(dir, { ...cliDeps(dir, spawn), probeModelRoster });
+        assert.equal(answered.ok, true);
+        assert.equal(answered.source, 'acp', 'the ids the panel offers are the ones a switch accepts');
+        assert.equal(spawn.calls.length, 0, 'a usable roster means the CLI listing is never asked for');
+        assert.deepEqual(answered.list.map(entry => entry.id), ['default[]', 'composer-2.5[fast=true]']);
+        assert.equal(answered.list[0].current, true);
+
+        // The cache remembers which source answered, not just the entries.
+        assert.equal(readSettings(dir).modelsSource, 'acp');
+        const warm = await modelsFor(dir, { ...cliDeps(dir, spawn), probeModelRoster });
+        assert.equal(warm.cached, true);
+        assert.equal(warm.source, 'acp', 'a cached roster still says it is a roster');
+    });
+});
+
+test('a probe that cannot answer falls back to the listing and keeps the good list on total failure', async () => {
+    await withDataDir(async (dir) => {
+        const spawn = fakeSpawn({ stdout: LISTING });
+        const failing = async () => ({ ok: false, error: 'probe exploded' });
+
+        const listed = await modelsFor(dir, { ...cliDeps(dir, spawn), probeModelRoster: failing });
+        assert.equal(listed.ok, true);
+        assert.equal(listed.source, 'cli', 'the alias listing is the only source left');
+        assert.equal(listed.list.length, 8);
+        assert.equal(readSettings(dir).modelsSource, 'cli');
+
+        const emptyProbe = async () => ({ ok: true, list: [] });
+        const broken = await modelsFor(dir, {
+            ...cliDeps(dir, fakeSpawn({ stdout: '', stderr: 'error: not logged in\n' })),
+            probeModelRoster: emptyProbe,
+            force: true,
+        });
+        assert.equal(broken.ok, false);
+        assert.match(broken.error, /not logged in/);
+        assert.match(broken.probeError, /nothing/, 'the probe\'s own reason is reported beside the listing failure');
+        assert.equal(broken.list.length, 8, 'a probe that answers nothing must not wipe a good list');
+        assert.equal(readSettings(dir).models.length, 8, 'and it must not be written to disk either');
+    });
+});
+
 test('a settings file the operator hand-edited survives a round trip', async () => {
     await withDataDir(async (dir) => {
         writeFileSync(settingsPath(dir), `${JSON.stringify({ model: 'glm-5.2-max', mode: 'ask' }, null, 4)}\n`, 'utf8');

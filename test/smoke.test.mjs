@@ -104,9 +104,12 @@ test('the Cursor CLI is discoverable and its argv is well formed', () => {
     const auto = acpArgv(agent, 'auto');
     assert.ok(auto.includes('acp'), 'argv must contain the acp subcommand');
     assert.ok(!auto.includes('--model'), 'the "auto" model must not be passed through');
+    assert.ok(!acpArgv(agent, 'default[]').includes('--model'),
+        'the protocol-only default alias is not a CLI flag either');
     const pinned = acpArgv(agent, 'composer-2.5[fast=true]');
     assert.equal(pinned[pinned.length - 1], 'acp', 'acp must stay last');
-    assert.equal(pinned[pinned.indexOf('--model') + 1], 'composer-2.5[fast=true]');
+    assert.equal(pinned[pinned.indexOf('--model') + 1], 'composer-2.5',
+        'the spawn flag takes the bare alias the CLI lists, not the parameterised id');
 });
 
 test('data dir honours the environment override', () => {
@@ -347,8 +350,10 @@ test('apply() mounts the tool and the HTTP routes against the host contract', as
         assert.equal(typeof registered.execute, 'function');
         assert.equal(registered.isConcurrencySafe({ task: 'x' }), false);
 
-        // The HTTP surfaces ask for the service instead of racing it.
-        assert.deepEqual(injected, [['webServer']], 'the routes declare webServer as a dependency');
+        // The HTTP surfaces ask for the service instead of racing it, and the
+        // command mounts through its own optional dependency, so a headless host
+        // still gets the coding tool.
+        assert.deepEqual(injected, [['commands'], ['webServer']], 'the command and the routes declare their dependencies');
 
         // The reporting surfaces, by exact path.
         assert.deepEqual(routes.map(route => route.path).sort(), [
@@ -406,13 +411,16 @@ test('the HTTP routes wait for webServer, and are never registered without it', 
 
         // The coding tool must not depend on the web server.
         assert.equal(registered.name, 'cursor_code', 'the tool mounts even with no web server in sight');
-        assert.deepEqual(injected, [['webServer']], 'the HTTP surfaces ask for webServer');
-        assert.equal(activations.length, 1, 'exactly one deferred activation is handed to Cordis');
+        assert.deepEqual(injected, [['commands'], ['webServer']], 'each optional surface asks for its own service');
+        assert.equal(activations.length, injected.length, 'one deferred activation per injected service');
         assert.equal(routes.length, 0, 'no route may be registered before the service exists');
 
-        // Cordis activates the scope once the service is ready.
+        // Cordis activates the scope once the service is ready. Found by
+        // dependency, not by position: the command's mount comes first.
         webServer = { register: (route) => { routes.push(route); return () => { routes.splice(routes.indexOf(route), 1); }; } };
-        activations[0](webCtx);
+        const webIndex = injected.findIndex(deps => deps.includes('webServer'));
+        assert.notEqual(webIndex, -1, 'the HTTP surfaces ask for webServer');
+        activations[webIndex](webCtx);
 
         assert.deepEqual(routes.map(route => route.path).sort(), [
             '/plugins/dsh-cursor-dev/',

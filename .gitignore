@@ -13,6 +13,9 @@ result.txt
 .commit-msg.txt
 .probe-*.mjs
 
+# Probe scratch: extracted asar trees and one-off probes (findings live beside them)
+.probe-tmp/
+
 # Editor / OS noise
 .DS_Store
 Thumbs.db
