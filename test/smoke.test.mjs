@@ -578,7 +578,10 @@ test('usage routes register against the host contract and answer HTTP', async ()
         const inline = dashboard.body.match(/<script>([\s\S]*?)<\/script>/g).map(block => block.replace(/^<script>|<\/script>$/g, ''));
         assert.equal(inline.length, 1, 'the dashboard ships exactly one inline script');
         assert.doesNotThrow(() => new Function(inline[0]), 'the dashboard script must be syntactically valid JavaScript');
-        assert.equal(dashboard.body.includes("join('\\n')"), true, 'an escaped newline must survive the template');
+        // The click on a session key is a message to the client half, so both
+        // halves must name the same message; a typo here is a dead link.
+        assert.match(dashboard.body, /dsh-cursor-dev:open-child/, 'the dashboard posts the message the client half listens for');
+        assert.match(dashboard.body, /openChildHint/, 'the row explains where a click goes');
         const english = await call('/plugins/dsh-cursor-dev/', '/plugins/dsh-cursor-dev/?lang=en');
         assert.match(english.body, /<html lang="en"/);
         const bootstrapEn = JSON.parse(english.body.match(/id="bootstrap">([\s\S]*?)<\/script>/)[1]);

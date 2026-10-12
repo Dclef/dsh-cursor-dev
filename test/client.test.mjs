@@ -46,7 +46,7 @@ function makeReact() {
 }
 
 /** Evaluate the bundle against a fake loader and capture what it registers. */
-function loadBundle({ react = makeReact().api } = {}) {
+function loadBundle({ react = makeReact().api, window: extras = {} } = {}) {
     let loaded;
     const warnings = [];
     const window = {
@@ -55,6 +55,7 @@ function loadBundle({ react = makeReact().api } = {}) {
                 loaded = module;
             },
         },
+        ...extras,
     };
     const console = { warn: (...args) => warnings.push(args.join(' ')), error: () => {} };
     // eslint-disable-next-line no-new-func -- the bundle is a classic script
@@ -359,6 +360,65 @@ test('a missing slots service degrades to a warning instead of a failed load', (
     assert.doesNotThrow(() => exports.apply(fakeContext({}).ctx));
     assert.equal(warnings.length, 1, 'one warning for the absent seat owner');
     assert.match(warnings.join('\n'), /slots service is unavailable/);
+});
+
+/**
+ * The panel's jump into a mirrored child conversation.
+ *
+ * The dashboard is an iframe, so the click travels as a message and this half
+ * performs the opening. These guards pin the three things that make that safe:
+ * the address is passed through unchanged, a foreign origin or a malformed
+ * message is ignored, and a host without the workspace service stays silent.
+ */
+test('the panel can hand a child conversation to the app shell', () => {
+    const opened = [];
+    const listeners = new Map();
+    const window = {
+        location: { origin: 'http://127.0.0.1:19387' },
+        addEventListener: (type, handler) => listeners.set(type, handler),
+        removeEventListener: type => listeners.delete(type),
+    };
+    const { exports } = loadBundle({ window });
+    exports.apply(fakeContext({ uiWorkspace: { openSession: address => opened.push(address) } }).ctx);
+
+    const onMessage = listeners.get('message');
+    assert.equal(typeof onMessage, 'function', 'the bridge listens for the dashboard message');
+
+    onMessage({
+        origin: 'http://127.0.0.1:19387',
+        data: {
+            type: 'dsh-cursor-dev:open-child',
+            parentSessionId: 'session-parent',
+            childSessionId: 'session-child',
+            mode: 'one-shot',
+        },
+    });
+    assert.deepEqual(opened, [{
+        parentSessionId: 'session-parent',
+        childSessionId: 'session-child',
+        mode: 'one-shot',
+    }], 'the address reaches the workspace service unchanged');
+
+    onMessage({
+        origin: 'http://evil.example',
+        data: { type: 'dsh-cursor-dev:open-child', childSessionId: 'session-child' },
+    });
+    onMessage({ origin: 'http://127.0.0.1:19387', data: { type: 'something-else' } });
+    onMessage({ origin: 'http://127.0.0.1:19387', data: { type: 'dsh-cursor-dev:open-child' } });
+    assert.equal(opened.length, 1, 'only a same-origin, well-formed address is opened');
+});
+
+test('a host without the workspace service gets no bridge and no complaint', () => {
+    const listeners = new Map();
+    const window = {
+        location: { origin: 'http://127.0.0.1:19387' },
+        addEventListener: (type, handler) => listeners.set(type, handler),
+        removeEventListener: type => listeners.delete(type),
+    };
+    const { exports, warnings } = loadBundle({ window });
+    assert.doesNotThrow(() => exports.apply(fakeContext({ slots: fakeSlots().service }).ctx));
+    assert.equal(listeners.has('message'), false, 'no listener is installed without the service');
+    assert.equal(warnings.length, 0, 'an absent optional service is not worth a warning');
 });
 
 /** A probe answer shaped like the host's own `/status` payload. */

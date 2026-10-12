@@ -108,7 +108,7 @@ dsh plugin add dsh-cursor-dev
 
 - **额度** —— 包含额度、Auto 桶、API 桶、本期花费、计费周期，30 秒自动刷新。
 - **子智能体模型** —— 下拉列的是**会话真实接受的 id**（ACP 会话目录优先，拿不到才退到 CLI 的 `--list-models` 别名列表），点保存就生效，**下一次调用就用它**，不用重启。留空 = 跟随 CLI 默认（Auto → `default[]`）。账户不提供的模型会被标成不可用，而不是让整轮调用失败。
-- **会话** —— 上半张表是当前活着的进程（会话 id、模型、模式、回合数、**正在干什么**）；下半张表是历史会话。**点会话键**展开那一轮的执行日志：任务、模型、逐步时间线。
+- **会话** —— 上半张表是当前活着的进程（会话 id、模型、模式、回合数、**正在干什么**）；下半张表是历史会话。**点会话键直接跳到那次运行的子智能体对话**（页面会顺手收起，不然它挡着刚打开的那条）；万一那次运行没有对话记录（旧版本、或这台机器没有 agent loop），点它退回去展开那一轮的执行日志：任务、模型、逐步时间线。
 
 额度数据是从本机 Cursor 自己的凭据（`%APPDATA%\Cursor\auth.json`）只读调它的 dashboard RPC 拿的，**token 不会被记录、不会出现在任何响应里**。你也可以直接开 <http://127.0.0.1:19387/plugins/dsh-cursor-dev/> 看同一个页面（DSH 桌面版运行时）。
 
@@ -176,7 +176,7 @@ dsh plugin add dsh-cursor-dev
 npm test        # node --test --test-force-exit "test/**/*.test.mjs"
 ```
 
-135 个测试、10 个文件，**不需要 DSH**：真实的 Cursor CLI + 真实插件模块，覆盖模型切换、两个模型 id 命名空间（`auto` ⇄ `default[]`、别名 ⇄ 带参数的 id）之间的解析与比较、CLI 列表里带 `cursor-` 工作区前缀的别名到会话清单 id 的映射、`probeModelRoster` 会话清单与 `--list-models` 别名列表的来源优先级、**续聊判定说同一种模型（别名与它的带参数 id 算同一个，真换模型才开新会话）**、`continueSession` 复用、**新进程 `session/load` 后仍记得自己写过什么**、真实 diff、坏模型报错、额度 RPC 及其降级、把路由挂到真实 HTTP 服务上跑一遍、「**webServer 还没就绪时一条路由都不许挂、就绪后五条全挂上**」、「找不到 CLI 时插件照样挂载、只有工具报错」、返回值必须能无损序列化（否则一次成功的运行会被宿主当成失败丢掉）、`/cursor-subagent` 命令（注册形状、任务与 `-m` 的拆分、空任务只报用法、**命令自己把活派给子智能体而不是先问父模型**、跑完把「改了哪些文件/用的哪个模型/它自己的说明」交给父模型审查、运行失败也变成一条消息而不是消失）、**子智能体对话镜像**（一个回合写成的完整 DSH 事件序列、surface 规则——`user/message`/`assistant/message`/`tool/result` 必须带 `surfaceOp` 而 `tool/call` 绝不能带、工具卡片用 `sourceEventSeqs` 配对自己的调用、没报结果的调用在收尾时补一条、重复的工具更新只开一张卡、第二个回合接在同一个对话里、被中断的回合不会被丢掉、失败/取消/超限三种收尾、描述符与目录条目跟运行时写的一模一样、子对话继承父路由并带上层级、**记着的子对话要重新打开而不是再开一个**、宿主没有 agent loop 时静默降级、活着的子对话数量有上限），以及面板这一侧：模型列表解析与缓存、设置的读/合并/原子写、面板选择与 profile 配置的优先级、`settings` 路由、`agent status --format json` 的登录状态解析与 60 秒缓存（含超时与未登录两种降级），还有浏览器半边的设置页与新装引导卡片（含**开机竞态**的回归测试）。
+138 个测试、10 个文件，**不需要 DSH**：真实的 Cursor CLI + 真实插件模块，覆盖模型切换、两个模型 id 命名空间（`auto` ⇄ `default[]`、别名 ⇄ 带参数的 id）之间的解析与比较、CLI 列表里带 `cursor-` 工作区前缀的别名到会话清单 id 的映射、`probeModelRoster` 会话清单与 `--list-models` 别名列表的来源优先级、**续聊判定说同一种模型（别名与它的带参数 id 算同一个，真换模型才开新会话）**、`continueSession` 复用、**新进程 `session/load` 后仍记得自己写过什么**、真实 diff、坏模型报错、额度 RPC 及其降级、把路由挂到真实 HTTP 服务上跑一遍、「**webServer 还没就绪时一条路由都不许挂、就绪后五条全挂上**」、「找不到 CLI 时插件照样挂载、只有工具报错」、返回值必须能无损序列化（否则一次成功的运行会被宿主当成失败丢掉）、`/cursor-subagent` 命令（注册形状、任务与 `-m` 的拆分、空任务只报用法、**命令自己把活派给子智能体而不是先问父模型**、跑完把「改了哪些文件/用的哪个模型/它自己的说明」交给父模型审查、运行失败也变成一条消息而不是消失）、**子智能体对话镜像**（一个回合写成的完整 DSH 事件序列、surface 规则——`user/message`/`assistant/message`/`tool/result` 必须带 `surfaceOp` 而 `tool/call` 绝不能带、工具卡片用 `sourceEventSeqs` 配对自己的调用、没报结果的调用在收尾时补一条、重复的工具更新只开一张卡、第二个回合接在同一个对话里、被中断的回合不会被丢掉、失败/取消/超限三种收尾、描述符与目录条目跟运行时写的一模一样、子对话继承父路由并带上层级、**记着的子对话要重新打开而不是再开一个**、宿主没有 agent loop 时静默降级、活着的子对话数量有上限），以及面板这一侧：模型列表解析与缓存、设置的读/合并/原子写、面板选择与 profile 配置的优先级、`settings` 路由、**点会话键跳进子智能体对话的那条跨窗口消息**（地址原样透传、**不同来源或格式不对的消息一律丢掉**、宿主没有工作区服务时不装监听也不吵）、`agent status --format json` 的登录状态解析与 60 秒缓存（含超时与未登录两种降级），还有浏览器半边的设置页与新装引导卡片（含**开机竞态**的回归测试）。
 
 ---
 
@@ -244,7 +244,7 @@ Every call returns a step-by-step tool timeline and the **real `{oldText, newTex
 
 Every call also leaves a **child conversation in the current session header** (the "N subagents" button): open it and you get the run as it happened — the task you handed over, each tool Cursor called, what each file edit changed, and the child's closing message. That is Cursor's conversation mapped into DSH rather than a separate viewer, and continuing the work appends a turn to the same record instead of creating a second one.
 
-The panel (**Settings → Cursor child agent**, Chinese by default with a one-click English switch) shows quota, live sessions with what each is doing, durable conversations (**click a key for the run journal**) and the model picker. Usage comes read-only from Cursor's own local credentials; the token is never logged or returned. The same page is served at `http://127.0.0.1:19387/plugins/dsh-cursor-dev/`.
+The panel (**Settings → Cursor child agent**, Chinese by default with a one-click English switch) shows quota, live sessions with what each is doing, durable conversations and the model picker. **Click a session key to jump straight to that run's child conversation** (the panel closes itself on the way — otherwise it would cover the session it just opened); when a run has no child conversation (an older release, or a host without an agent loop) the click falls back to unfolding that run's step timeline. Usage comes read-only from Cursor's own local credentials; the token is never logged or returned. The same page is served at `http://127.0.0.1:19387/plugins/dsh-cursor-dev/`.
 
 ### Parameters, if you want them
 
@@ -263,7 +263,7 @@ Two model-id name spaces exist and must not be confused (this is the old "the pa
 ### Development
 
 ```bash
-npm test        # 135 tests, 10 files, no DSH required
+npm test        # 138 tests, 10 files, no DSH required
 ```
 
 ## License
