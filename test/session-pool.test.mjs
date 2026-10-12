@@ -36,8 +36,9 @@ const FIXTURE_ROSTER = [
  * A minimal in-process ACP peer: no child process, every request recorded.
  *
  * @param {string} current - the model the session reports as current.
+ * @param {object[]} replay - updates a `session/load` replays before it settles.
  */
-function fakeAcp(current = 'composer-2.5[fast=true]') {
+function fakeAcp(current = 'composer-2.5[fast=true]', replay = []) {
     const toChild = new PassThrough();
     const fromChild = new PassThrough();
     const stderr = new PassThrough();
@@ -67,8 +68,15 @@ function fakeAcp(current = 'composer-2.5[fast=true]') {
             return write({ jsonrpc: '2.0', id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
         if (method === 'session/new')
             return write({ jsonrpc: '2.0', id, result: payload(`stub-${++sessions}`) });
-        if (method === 'session/load')
+        if (method === 'session/load') {
+            // A real load streams the whole stored transcript as notifications
+            // BEFORE the response settles; anything the plugin wants from it must
+            // be collected in that window. The params shape is the CLI's:
+            // `{sessionId, update}`.
+            for (const update of replay)
+                write({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: params.sessionId, update } });
             return write({ jsonrpc: '2.0', id, result: payload(params.sessionId) });
+        }
         if (method === 'session/set_config_option') {
             sent.push(params.value);
             if (!FIXTURE_ROSTER.some(entry => entry.value === params.value))
@@ -220,4 +228,80 @@ test('an unknown roster cannot prove sameness, so the run still starts fresh', a
         assert.equal(second.sessionId, first.sessionId);
         assert.equal(second.reused, true);
     });
+});
+
+test('replaying history reads the stored transcript and holds the turn lock', async () => {
+    const stub = fakeAcp('composer-2.5[fast=true]', [
+        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'old task' } },
+        { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'thinking about it' } },
+        { sessionUpdate: 'tool_call', toolCallId: 'replay-0-1', title: 'Edit `a.txt`', kind: 'edit', status: 'pending', rawInput: { path: 'a.txt' }, locations: [{ path: 'a.txt' }] },
+        { sessionUpdate: 'tool_call_update', toolCallId: 'replay-0-1', status: 'completed', content: [{ type: 'diff', path: 'a.txt', oldText: '-- /dev/null', newText: '++ b/a.txt\nhi' }] },
+        { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'wrote it' } },
+    ]);
+    const cwd = mkdtempSync(join(tmpdir(), 'dsh-cursor-replay-'));
+    const pool = new SessionPool({ resolved: { command: 'stub', entry: undefined }, env: {}, spawn: stub.spawn, maxLiveSessions: 4 }, () => { });
+    try {
+        const order = [];
+        let queued;
+        const events = await pool.replay({ sessionId: 'old-session', cwd }, async ({ session, events }) => {
+            // The lock is held for the whole body: a real turn asked for while a
+            // replay runs must not start until the body returns.
+            order.push('body');
+            assert.equal(session.sessionId, 'old-session', 'the loaded session keeps its id');
+            queued = pool.run({ key: 'other#1', storeKey: 'other', cwd }, async () => { order.push('turn'); });
+            await new Promise(resolve => setTimeout(resolve, 20));
+            assert.deepEqual(order, ['body'], 'a turn must not interleave with a replay');
+            return events;
+        });
+        await queued;
+        assert.deepEqual(order, ['body', 'turn'], 'the queued turn runs once the replay is done');
+        // `session-loaded` is the load's own completion marker; it trails the
+        // replayed content because the CLI settles the request last.
+        assert.equal(events.at(-1).kind, 'session-loaded');
+        assert.deepEqual(events.slice(0, -1).map(event => event.kind), ['prompt', 'thought', 'tool-call', 'diff', 'tool-update', 'text']);
+        assert.equal(events[0].text, 'old task');
+        // The tool call is ONE object carrying the title from the call and the
+        // diff from the update — the merge a replay turn exists to make happen.
+        const call = events.find(event => event.kind === 'tool-call').call;
+        assert.equal(call.id, 'replay-0-1');
+        assert.equal(call.name, 'Edit `a.txt`');
+        const update = events.find(event => event.kind === 'tool-update');
+        assert.equal(update.call.status, 'completed');
+        assert.equal(update.call.diffs[0].newText, 'hi', 'the /dev/null header is stripped');
+        // A replay is a read: it must never switch the model or prompt.
+        assert.deepEqual(stub.sent, [], 'replaying history must not change the CLI model');
+        // The throwaway session is disposed, and nothing was pooled under the
+        // replay's name.
+        assert.deepEqual(pool.snapshot().map(row => row.key), ['other#1'], 'a replay never becomes a live conversation');
+    }
+    finally {
+        await pool.dispose();
+        stub.stop();
+    }
+});
+
+test('replaying a live conversation closes it first, so the store is never opened twice', async () => {
+    const stub = fakeAcp('composer-2.5[fast=true]', [
+        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'old task' } },
+    ]);
+    const cwd = mkdtempSync(join(tmpdir(), 'dsh-cursor-replay-live-'));
+    const pool = new SessionPool({ resolved: { command: 'stub', entry: undefined }, env: {}, spawn: stub.spawn, maxLiveSessions: 4 }, () => { });
+    try {
+        // A real turn puts a live session in the pool…
+        await pool.run({ key: 'conv#1', storeKey: 'conv', cwd, persistedSessionId: 'old-session' }, async () => { });
+        assert.equal(pool.snapshot().length, 1, 'the turn pooled a live session');
+        assert.equal(pool.snapshot()[0].cursorSessionId, 'old-session');
+
+        // …and reading that same conversation back must not open it a second
+        // time: the CLI store is single-writer.
+        const events = await pool.replay({ sessionId: 'old-session', cwd }, async ({ events }) => events);
+        assert.equal(events[0].kind, 'prompt');
+        assert.equal(pool.snapshot().length, 0, 'the live entry holding that session was closed');
+        // The durable record survives, so the next turn loads it again.
+        assert.equal(pool.persistedFor('conv').sessionId, 'old-session');
+    }
+    finally {
+        await pool.dispose();
+        stub.stop();
+    }
 });

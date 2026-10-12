@@ -27,8 +27,11 @@ import {
     createMirrorHub,
     cursorDescriptor,
     delegationDepthOf,
+    foldTranscript,
     highestTurn,
+    mirrorTranscript,
     openCursorChild,
+    openRestoredChild,
     resolveChildAgentOptions,
     resolveChildDepth,
     resumeCursorChild,
@@ -596,4 +599,196 @@ test('turn end reasons cover every outcome the runtime understands', () => {
         error: { message: 'cursor run ended with refusal', code: 'cursor/run-failed' },
     });
     assert.equal(turnEndReason({ ok: false, stopReason: 'error', error: 'boom' }).error.message, 'boom');
+});
+
+/**
+ * A replayed transcript is the only structure a `session/load` gives back: no
+ * turn events, just prompts, thoughts, answers and tool traffic. These tests pin
+ * how that stream is cut into turns, because a wrong boundary silently merges two
+ * of the user's requests into one turn — or drops one entirely.
+ */
+test('a replayed transcript is cut into one turn per prompt', () => {
+    const turns = foldTranscript([
+        { kind: 'prompt', text: 'first task' },
+        { kind: 'thought', text: 'thinking' },
+        { kind: 'text', text: 'done' },
+        { kind: 'prompt', text: 'second task' },
+        { kind: 'text', text: 'done again' },
+    ]);
+    assert.equal(turns.length, 2);
+    assert.equal(turns[0].prompt, 'first task');
+    assert.deepEqual(turns[0].events.map(event => event.kind), ['thought', 'text']);
+    assert.equal(turns[1].prompt, 'second task');
+    assert.deepEqual(turns[1].events.map(event => event.kind), ['text']);
+});
+
+test('a prompt split across chunks stays one turn, and leading events are kept', () => {
+    // The CLI may emit several `user_message_chunk`s for one prompt; only the
+    // first opens the turn, or one request becomes several.
+    const turns = foldTranscript([
+        { kind: 'prompt', text: 'the ' },
+        { kind: 'prompt', text: 'whole task' },
+        { kind: 'text', text: 'answer' },
+        { kind: 'prompt', text: 'next' },
+    ]);
+    assert.equal(turns.length, 2);
+    assert.equal(turns[0].prompt, 'the whole task');
+    assert.deepEqual(turns[0].events.map(event => event.kind), ['text']);
+    assert.equal(turns[1].prompt, 'next');
+
+    // A replay that somehow starts with work still records it rather than
+    // dropping it on the floor.
+    const leading = foldTranscript([{ kind: 'thought', text: 'stray' }]);
+    assert.equal(leading.length, 1);
+    assert.equal(leading[0].prompt, '');
+    assert.deepEqual(leading[0].events.map(event => event.kind), ['thought']);
+});
+
+test('a restored transcript becomes the same turn a live run writes', () => {
+    const session = fakeSession();
+    const mirror = new CursorMirror(session);
+    const written = mirrorTranscript(mirror, [
+        { kind: 'prompt', text: 'make hello.txt' },
+        { kind: 'thought', text: 'planning' },
+        { kind: 'tool-call', call: { id: 'replay-0-1', name: 'Edit File', kind: 'edit', status: 'pending', path: 'hello.txt', input: { path: 'hello.txt' } } },
+        { kind: 'diff', callId: 'replay-0-1', diff: { path: 'hello.txt', oldText: null, newText: 'hi\n' } },
+        { kind: 'tool-update', call: { id: 'replay-0-1', status: 'completed', path: 'hello.txt' }, diffCount: 1 },
+        { kind: 'text', text: 'created it' },
+        { kind: 'prompt', text: 'now delete it' },
+        { kind: 'text', text: 'deleted' },
+    ], { model: 'composer-2.5[fast=true]' });
+
+    assert.equal(written, 2);
+    assert.equal(ofType(session, 'turn/start').length, 2);
+    assert.equal(ofType(session, 'turn/end').length, 2);
+    assert.equal(ofType(session, 'user/message')[0].data.content[0].text, 'make hello.txt');
+    assert.equal(ofType(session, 'user/message')[1].data.content[0].text, 'now delete it');
+    // The restored tool card is a real pair, exactly like a live run's.
+    const call = ofType(session, 'tool/call')[0];
+    const result = ofType(session, 'tool/result')[0];
+    assert.equal(call.data.callId, 'replay-0-1');
+    assert.deepEqual(result.sourceEventSeqs, [call.seq]);
+    assert.match(result.data.message.content[0].text, /hello\.txt/);
+    // The answer carries the model the conversation actually ran with.
+    assert.equal(ofType(session, 'assistant/message')[0].data.message.source.model, 'composer-2.5[fast=true]');
+    // Every turn is closed, so the row reads as completed rather than stuck.
+    assert.deepEqual(ofType(session, 'turn/end').map(event => event.data.reason), [
+        { kind: 'completed' },
+        { kind: 'completed' },
+    ]);
+});
+
+test('a restored conversation is published for a parent that is long gone', async () => {
+    const created = [];
+    const agents = {
+        async create(options) {
+            created.push(options);
+            const session = fakeSession({ header: { id: options.sessionId, createdAt: 7 } });
+            const child = { id: options.sessionId, session };
+            options.setup?.({ get: () => undefined }, child);
+            return { agent: child, dispose: async () => {} };
+        },
+    };
+
+    const opened = await openRestoredChild({
+        agents,
+        parent: undefined,
+        parentSessionId: 'session-parent',
+        cwd: 'E:\\work',
+        label: 'default',
+    });
+    assert.ok(opened !== undefined);
+    assert.equal(created[0].parentAgent, undefined, 'there is no live parent to own it');
+    // The lineage is rebuilt from what the durable record knows.
+    assert.deepEqual(created[0].meta, {
+        cwd: 'E:\\work',
+        parentSession: 'session-parent',
+        isSeeded: false,
+        origin: 'subagent',
+        delegationDepth: 1,
+    });
+    // A restored child never runs a turn, so it needs no model route.
+    assert.deepEqual(created[0].agentOptions, { subagentDepth: 1 });
+    assert.equal(ofType(opened.child.session, 'subagent/descriptor').length, 1);
+    assert.equal(opened.child.session.header.parentSession, undefined, 'no live parent means no catalog row');
+});
+
+test('restoring through the hub publishes the transcript and remembers it', async () => {
+    const { parent, parentSession } = fakeParent();
+    const created = [];
+    const agents = {
+        get: id => (id === 'session-parent' ? parent : undefined),
+        async create(options) {
+            created.push(options);
+            const session = fakeSession({ header: { id: options.sessionId, createdAt: 7 } });
+            const child = { id: options.sessionId, session };
+            options.setup?.({ get: () => undefined }, child);
+            return { agent: child, dispose: async () => { child.disposed = true; } };
+        },
+    };
+    const hub = createMirrorHub({});
+    hub.bind({ get: name => (name === 'agents' ? agents : undefined) });
+
+    const restored = await hub.restore({
+        key: 'session-parent::default',
+        parentSessionId: 'session-parent',
+        cwd: 'E:\\work',
+        label: 'default',
+        model: 'composer-2.5',
+        events: [
+            { kind: 'prompt', text: 'old task' },
+            { kind: 'text', text: 'old answer' },
+        ],
+    });
+    assert.ok(restored !== undefined);
+    assert.equal(restored.restored, true);
+    assert.equal(created.length, 1);
+    // The live parent is found by id, so the row appears in its header.
+    assert.equal(created[0].parentAgent, parent);
+    assert.equal(ofType(parentSession, 'subagent/catalog').length, 1);
+    const answer = ofType(restored.child.session, 'assistant/message')[0];
+    assert.equal(answer.data.message.content[0].text, 'old answer');
+
+    // A second click is the same conversation, not a second child.
+    const again = await hub.restore({ key: 'session-parent::default', parentSessionId: 'session-parent', events: [] });
+    assert.equal(again, restored);
+    assert.equal(created.length, 1);
+
+    assert.deepEqual(hub.snapshot().map(row => row.restored), [true]);
+    await hub.dispose();
+});
+
+test('a restore that cannot be published reports it instead of pretending', async () => {
+    const warnings = [];
+    const hub = createMirrorHub({ logger: { warn: message => warnings.push(message), info: () => {} } });
+    // No agent loop at all.
+    assert.equal(await hub.restore({ key: 'p::default', parentSessionId: 'p', events: [] }), undefined);
+
+    hub.bind({ get: () => ({ get: () => undefined, create: async () => { throw new Error('no factory'); } }) });
+    assert.equal(await hub.restore({ key: 'p::default', parentSessionId: 'p', events: [] }), undefined);
+    assert.ok(warnings.some(message => /could not publish the restored conversation: no factory/.test(message)));
+
+    // A child whose log cannot be written is disposed again rather than left
+    // half-mirrored, and no id is handed back for it. The descriptor lands (a
+    // real session accepts it) and the first turn event is what fails.
+    const agents = {
+        get: () => undefined,
+        async create(options) {
+            const session = {
+                header: { id: options.sessionId, createdAt: 7 },
+                append(type) {
+                    if (type === 'subagent/descriptor')
+                        return { type, seq: 0, time: 1, data: {} };
+                    throw new Error('log refused');
+                },
+            };
+            const child = { id: options.sessionId, session };
+            options.setup?.({ get: () => undefined }, child);
+            return { agent: child, dispose: async () => { child.disposed = true; } };
+        },
+    };
+    const second = createMirrorHub({ logger: { warn: message => warnings.push(message), info: () => {} } });
+    second.bind({ get: () => agents });
+    assert.equal(await second.restore({ key: 'p::default', parentSessionId: 'p', events: [{ kind: 'prompt', text: 'x' }] }), undefined);
+    assert.ok(warnings.some(message => /could not write the restored transcript/.test(message)));
 });

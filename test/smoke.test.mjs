@@ -359,6 +359,7 @@ test('apply() mounts the tool and the HTTP routes against the host contract', as
         assert.deepEqual(routes.map(route => route.path).sort(), [
             '/plugins/dsh-cursor-dev/',
             '/plugins/dsh-cursor-dev/api/journal',
+            '/plugins/dsh-cursor-dev/api/restore',
             '/plugins/dsh-cursor-dev/api/settings',
             '/plugins/dsh-cursor-dev/api/usage',
             '/plugins/dsh-cursor-dev/status',
@@ -425,6 +426,7 @@ test('the HTTP routes wait for webServer, and are never registered without it', 
         assert.deepEqual(routes.map(route => route.path).sort(), [
             '/plugins/dsh-cursor-dev/',
             '/plugins/dsh-cursor-dev/api/journal',
+            '/plugins/dsh-cursor-dev/api/restore',
             '/plugins/dsh-cursor-dev/api/settings',
             '/plugins/dsh-cursor-dev/api/usage',
             '/plugins/dsh-cursor-dev/status',
@@ -541,16 +543,36 @@ test('usage routes register against the host contract and answer HTTP', async ()
         const index = new ConversationIndex(dir);
         await index.load();
         await index.set('a::default', { cursorSessionId: 'sid-1', workspaceRoot: 'C:\\w', model: 'composer-2.5', turns: 2 });
+        // A host that can both read Cursor history and hold a child conversation.
+        // Everything else about the pool is the real one, so the tables stay real.
+        const restored = [];
+        const restorePool = {
+            queued: pool.queued,
+            snapshot: () => pool.snapshot(),
+            replay: async (options, body) => {
+                restored.push(options);
+                return await body({ session: {}, events: [{ kind: 'prompt', text: 'old task' }] });
+            },
+        };
+        const mirrors = {
+            available: true,
+            snapshot: () => [],
+            restore: options => {
+                restored.push(options);
+                return { child: { session: { header: { id: 'session-restored', parentSession: options.parentSessionId } } }, mirror: { turn: 3, calls: 4 } };
+            },
+        };
         const dispose = registerUsageRoutes(ctx, {
             usage: new UsageClient({}),
-            pool,
+            pool: restorePool,
             journal,
             index,
             dataDir: dir,
+            mirrors,
         });
-        assert.equal(routes.size, 3, `expected 3 routes, got ${[...routes.keys()].join(', ')}`);
+        assert.equal(routes.size, 4, `expected 4 routes, got ${[...routes.keys()].join(', ')}`);
 
-        const call = async (path, url) => {
+        const call = async (path, url, extra) => {
             const route = routes.get(path);
             const chunks = [];
             const res = {
@@ -559,7 +581,7 @@ test('usage routes register against the host contract and answer HTTP', async ()
                 writeHead(status, headers) { this.status = status; this.headers = headers; return this; },
                 end(body) { chunks.push(body); },
             };
-            await route.handler({ url: url ?? path }, res);
+            await route.handler({ url: url ?? path, method: 'GET', ...extra }, res);
             return { status: res.status, contentType: res.headers?.['content-type'], body: chunks.join('') };
         };
 
@@ -582,6 +604,11 @@ test('usage routes register against the host contract and answer HTTP', async ()
         // halves must name the same message; a typo here is a dead link.
         assert.match(dashboard.body, /dsh-cursor-dev:open-child/, 'the dashboard posts the message the client half listens for');
         assert.match(dashboard.body, /openChildHint/, 'the row explains where a click goes');
+        // An old durable row has no child to open, so the panel offers to read
+        // the conversation back out of Cursor instead of showing an expired
+        // timeline. Both the endpoint and the explanation must be in the page.
+        assert.match(dashboard.body, /"restoreEndpoint":"\/plugins\/dsh-cursor-dev\/api\/restore"/, 'the panel knows where to restore from');
+        assert.match(dashboard.body, /restoreHint/, 'an old row says what its click will do');
         const english = await call('/plugins/dsh-cursor-dev/', '/plugins/dsh-cursor-dev/?lang=en');
         assert.match(english.body, /<html lang="en"/);
         const bootstrapEn = JSON.parse(english.body.match(/id="bootstrap">([\s\S]*?)<\/script>/)[1]);
@@ -609,6 +636,27 @@ test('usage routes register against the host contract and answer HTTP', async ()
         const found = await call('/plugins/dsh-cursor-dev/api/journal', '/plugins/dsh-cursor-dev/api/journal?key=' + encodeURIComponent('a::default#0'));
         assert.equal(found.status, 200);
         assert.equal(JSON.parse(found.body).task, 'tidy up');
+
+        // Restoring is the one route that does work: it reads the CLI's own
+        // store and publishes the result as a child conversation. A durable row
+        // made before the mirror existed has nothing else to open.
+        const restoredAnswer = await call('/plugins/dsh-cursor-dev/api/restore', '/plugins/dsh-cursor-dev/api/restore?key=' + encodeURIComponent('a::default'), { method: 'POST' });
+        assert.equal(restoredAnswer.status, 200);
+        const restoredBody = JSON.parse(restoredAnswer.body);
+        assert.equal(restoredBody.ok, true);
+        assert.equal(restoredBody.childSessionId, 'session-restored');
+        assert.equal(restoredBody.turns, 3);
+        assert.deepEqual(restored[0], { sessionId: 'sid-1', cwd: 'C:\\w', signal: restored[0].signal }, 'the recorded Cursor session is what gets read back');
+        assert.equal(restored[1].label, 'default', 'the child keeps the run label');
+        assert.equal(index.get('a::default').childSessionId, 'session-restored', 'the id is remembered for the next page load');
+
+        // Bad input is answered, never thrown at the host.
+        const wrongMethod = await call('/plugins/dsh-cursor-dev/api/restore', '/plugins/dsh-cursor-dev/api/restore?key=a::default');
+        assert.equal(wrongMethod.status, 405);
+        const noKey = await call('/plugins/dsh-cursor-dev/api/restore', '/plugins/dsh-cursor-dev/api/restore', { method: 'POST' });
+        assert.equal(noKey.status, 400);
+        const unknown = await call('/plugins/dsh-cursor-dev/api/restore', '/plugins/dsh-cursor-dev/api/restore?key=nope', { method: 'POST' });
+        assert.equal(unknown.status, 404);
 
         dispose();
         assert.equal(routes.size, 0, 'dispose must remove every route');
@@ -908,8 +956,9 @@ test('a missing Cursor CLI degrades the tool instead of failing the mount', asyn
     // Everything that does not need the CLI still mounts.
     assert.equal(mounted.length, 1);
     assert.equal(mounted[0].name, 'cursor_code');
-    assert.equal(routes.size, 5, [...routes.keys()].join(', '));
+    assert.equal(routes.size, 6, [...routes.keys()].join(', '));
     assert.equal(routes.has('/plugins/dsh-cursor-dev/api/settings'), true, 'the model picker mounts without a CLI too');
+    assert.equal(routes.has('/plugins/dsh-cursor-dev/api/restore'), true, 'the restore route mounts too, and refuses politely without a CLI');
 
     const failed = await mounted[0].execute({ task: 'do something' },
         { agent: { id: 'p' }, signal: new AbortController().signal });
