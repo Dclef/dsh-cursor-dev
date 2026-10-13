@@ -14,7 +14,13 @@
  *     and `tool/result` are surface-eligible and REQUIRE `surfaceOp`;
  *   - every other type must carry NO surface metadata at all;
  *   - `tool/result` cites the `tool/call` seq it answers through
- *     `sourceEventSeqs`, which is how the UI pairs a result with its card.
+ *     `sourceEventSeqs`, which is how the UI pairs a result with its card;
+ *   - and, from the v4 log validator, a `tool/call` is only admissible against a
+ *     `tool-call` content block an EARLIER `assistant/message` advertised, whose
+ *     name and `arguments` string match it exactly. Writing the card without
+ *     the announcement is what made a real child log unloadable
+ *     (`tool/call <id> has no advertised tool lifecycle`), so the double
+ *     enforces it rather than letting the same mistake pass here again.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -48,6 +54,10 @@ const SURFACE_TYPES = new Set(['system/message', 'developer/message', 'user/mess
 function fakeSession(options = {}) {
     const events = options.events ?? [];
     const appends = [];
+    // The v4 log's advertised-tool-lifecycle ledger: id -> {name, arguments,
+    // started}. An entry is created by an `assistant/message` `tool-call` block,
+    // consumed by the matching `tool/call`, and released by its `tool/result`.
+    const advertised = new Map();
     let seq = events.length;
     return {
         header: { id: 'session-child', createdAt: 1_700_000_000_000, ...options.header },
@@ -64,6 +74,32 @@ function fakeSession(options = {}) {
             for (const cited of opts?.sourceEventSeqs ?? []) {
                 if (!Number.isSafeInteger(cited) || cited < 0 || cited >= seq)
                     throw new Error(`session event "${type}" cites an impossible source seq ${cited}`);
+            }
+            if (type === 'assistant/message') {
+                for (const block of data.message.content) {
+                    if (block?.type !== 'tool-call')
+                        continue;
+                    if (advertised.has(block.id))
+                        throw new Error(`assistant/message repeats advertised tool call ${block.id}`);
+                    advertised.set(block.id, { name: block.name, arguments: block.arguments, started: false });
+                }
+            }
+            if (type === 'tool/call') {
+                const pending = advertised.get(data.callId);
+                if (pending === undefined)
+                    throw new Error(`tool/call ${data.callId} has no advertised tool lifecycle`);
+                if (pending.started || pending.name !== data.name || pending.arguments !== data.arguments)
+                    throw new Error(`tool/call ${data.callId} does not match one advertised tool call`);
+                pending.started = true;
+            }
+            if (type === 'tool/result') {
+                const callId = data.message.toolCallId;
+                const pending = advertised.get(callId);
+                if (pending === undefined)
+                    throw new Error(`tool/result ${callId} has no advertised tool lifecycle`);
+                if (!pending.started)
+                    throw new Error(`tool/result ${callId} is not the exact TOOL_NOT_STARTED repair`);
+                advertised.delete(callId);
             }
             const event = { type, seq, time: 1_700_000_000_000 + seq, data, ...opts === undefined ? {} : opts };
             events.push(event);
@@ -102,6 +138,9 @@ test('a mirrored run is a complete, renderable DSH turn', () => {
         'turn/start',
         'step/start',
         'user/message',
+        // A v4 log only admits a `tool/call` that an earlier assistant message
+        // advertised as a `tool-call` block, so the announcement comes first.
+        'assistant/message',
         'tool/call',
         'tool/result',
         'assistant/message',
@@ -130,8 +169,17 @@ test('a mirrored run is a complete, renderable DSH turn', () => {
     assert.match(result.data.message.content[0].text, /completed hello\.txt/);
     assert.match(result.data.message.content[0].text, /\+1\/-0/);
 
-    // Reasoning and answer land in ONE assistant message, in that order.
-    const answer = ofType(session, 'assistant/message')[0];
+    // The announcement row is what makes the `tool/call` below admissible, and
+    // it must agree with it on both the name and the exact arguments string.
+    const announce = ofType(session, 'assistant/message')[0];
+    assert.equal(announce.surfaceOp, 'append');
+    assert.deepEqual(announce.data.message.content, [
+        { type: 'tool-call', id: 'c1', name: 'Edit File', arguments: JSON.stringify({ path: 'hello.txt' }) },
+    ]);
+
+    // Reasoning and answer land in ONE assistant message, in that order, after
+    // the tool card it closes.
+    const answer = ofType(session, 'assistant/message').at(-1);
     assert.equal(answer.surfaceOp, 'append');
     assert.deepEqual(answer.data.message.content, [
         { type: 'reasoning', text: 'The file does not exist yet.' },
