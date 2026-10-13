@@ -25,6 +25,7 @@ import {
     parseModelList,
     readSettings,
     registerSettingsRoutes,
+    resolveModelSelection,
     settingsPath,
     writeSettings,
 } from '../lib/settings.js';
@@ -140,6 +141,38 @@ test('the panel choice beats the profile config, and an empty choice is not a ch
     assert.equal(effectiveModel(emptySettings(), 'composer-2.5'), 'composer-2.5');
     assert.equal(effectiveModel(emptySettings(), undefined), '', 'empty means "let the CLI decide"');
     assert.equal(effectiveModel(undefined, undefined), '');
+});
+
+test('locking Auto overrides explicit named models, and unlocking restores per-call selection', () => {
+    assert.deepEqual(resolveModelSelection({ model: 'auto', modelPolicy: 'panel' }, 'grok-4.7', 'composer-2.5[fast=true]'), {
+        model: 'default[]', source: 'panel-lock', locked: true, requestedModel: 'composer-2.5[fast=true]',
+    });
+    assert.deepEqual(resolveModelSelection({ model: 'auto', modelPolicy: 'per-call' }, '', 'grok-4.7'), {
+        model: 'grok-4.7', source: 'call', locked: false, requestedModel: 'grok-4.7',
+    });
+    assert.equal(resolveModelSelection({ model: 'default[]' }, '', '').model, 'default[]');
+    assert.equal(resolveModelSelection({ model: 'auto' }, '', '  ').source, 'panel');
+    assert.equal(resolveModelSelection({ model: '', modelPolicy: 'panel' }, 'auto', 'grok-4.7').source, 'config-lock');
+    assert.deepEqual(resolveModelSelection({ model: '', modelPolicy: 'panel' }, '', 'grok-4.7'), {
+        model: 'grok-4.7', source: 'call', locked: false, requestedModel: 'grok-4.7',
+    }, 'locking an absent default must not suppress the only model choice');
+    assert.deepEqual(resolveModelSelection(undefined, undefined, undefined), { model: '', source: 'cli', locked: false });
+    assert.equal(resolveModelSelection({ model: 'auto' }, '', 'composer-2.5').model, 'composer-2.5', 'old settings keep per-call behavior');
+});
+
+test('the settings API persists the lock and ignores malformed policy patches', async () => {
+    await withDataDir(async (dir) => {
+        const { ctx, routes } = fakeContext();
+        registerSettingsRoutes(ctx, cliDeps(dir, fakeSpawn({ stdout: LISTING })));
+        const saved = await call(routes[0], { method: 'POST', body: JSON.stringify({ model: 'auto', modelPolicy: 'panel' }) });
+        assert.equal(saved.json.settings.modelPolicy, 'panel');
+        assert.equal(saved.json.effectiveModel, 'default[]');
+        assert.equal(resolveModelSelection(readSettings(dir), '', 'grok-4.7').model, 'default[]');
+        await call(routes[0], { method: 'POST', body: JSON.stringify({ modelPolicy: 'invalid' }) });
+        assert.equal(readSettings(dir).modelPolicy, 'panel');
+        await call(routes[0], { method: 'POST', body: JSON.stringify({ modelPolicy: 'per-call' }) });
+        assert.equal(resolveModelSelection(readSettings(dir), '', 'grok-4.7').model, 'grok-4.7');
+    });
 });
 
 /** A fake `subprocess` service: one scripted CLI run per call. */
@@ -338,7 +371,7 @@ test('the settings API reports the state the panel needs to render', async () =>
         const { status, json } = await call(routes[0], {});
         assert.equal(status, 200);
         assert.equal(json.ok, true);
-        assert.deepEqual(json.settings, { model: 'kimi-k3-max', mode: '', language: 'en', updatedAt: json.settings.updatedAt });
+        assert.deepEqual(json.settings, { model: 'kimi-k3-max', modelPolicy: 'per-call', mode: '', language: 'en', updatedAt: json.settings.updatedAt });
         assert.equal(json.effectiveModel, 'kimi-k3-max', 'the panel choice is what a run would use');
         assert.equal(json.configModel, 'composer-2.5');
         assert.equal(json.agent.command, 'node.exe');

@@ -4,3 +4,11 @@
 - insert:
     - id: dsh-cursor-dev
       name: dsh-cursor-dev
+    - id: tool-cursor-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: cursor
+        toolName: cursor_subagent
+        maxDepth: provider-managed
+        backgroundMode: one-shot
+        enableRunInBackground: true

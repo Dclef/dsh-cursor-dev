@@ -353,7 +353,7 @@ test('apply() mounts the tool and the HTTP routes against the host contract', as
         // The HTTP surfaces ask for the service instead of racing it, and the
         // command mounts through its own optional dependency, so a headless host
         // still gets the coding tool.
-        assert.deepEqual(injected, [['agents'], ['commands'], ['webServer']], 'the child conversations, the command and the routes declare their dependencies');
+        assert.deepEqual(injected, [['agents'], ['subagents', 'agents'], ['commands'], ['webServer']], 'native runs and optional surfaces declare their dependencies');
 
         // The reporting surfaces, by exact path.
         assert.deepEqual(routes.map(route => route.path).sort(), [
@@ -412,7 +412,7 @@ test('the HTTP routes wait for webServer, and are never registered without it', 
 
         // The coding tool must not depend on the web server.
         assert.equal(registered.name, 'cursor_code', 'the tool mounts even with no web server in sight');
-        assert.deepEqual(injected, [['agents'], ['commands'], ['webServer']], 'each optional surface asks for its own service');
+        assert.deepEqual(injected, [['agents'], ['subagents', 'agents'], ['commands'], ['webServer']], 'each optional surface asks for its own service');
         assert.equal(activations.length, injected.length, 'one deferred activation per injected service');
         assert.equal(routes.length, 0, 'no route may be registered before the service exists');
 
