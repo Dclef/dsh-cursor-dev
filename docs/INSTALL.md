@@ -38,15 +38,15 @@ agent status --format json
 
 ## 2. 选择安装来源
 
-**发布状态（2026-10-13 核对）：** 公共 GitHub 仓库存在，npm 公共源尚未发布 `dsh-cursor-dev`。本轮新增的原生子智能体接入和面板模型锁定仍未从本地发布。GitHub 安装只会取得已推送的内容，不会包含维护者电脑上的未提交修改。
+**发布状态（2026-10-13 核对）：** 公共 GitHub 仓库存在，`0.9.0` 已推送到 `main`（原生 `cursor_subagent` 接入、面板模型锁定和本指南都在其中）。npm 公共源尚未发布 `dsh-cursor-dev`，所以按包名安装会返回 404；插件市场（dshmarket）的收录 PR 仍在审核，合并前市场里搜不到本插件。
 
 | 你要安装的内容 | 安装来源 |
 | --- | --- |
-| 已经推送到公开仓库的代码 | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
-| 含所需改动的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
-| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.8.1.tgz` |
+| 公开仓库的当前版本（推荐） | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
+| 你本地的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
+| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.9.0.tgz` |
 
-表中的本地路径是示例，需要换成实际位置；包名里的版本以收到的文件为准。要试用尚未公开的改动，先取得包含这些改动的源码或安装包。不要期待从公开仓库安装后自动获得尚未发布的功能。
+表中的本地路径是示例，需要换成实际位置；包名里的版本以收到的文件为准。Git 来源会取得仓库默认分支的最新提交，而 `.tgz` 是某一刻的固定快照——要跟进后续改动就用 Git 来源。
 
 ### 桌面用户：通过插件管理安装
 
@@ -80,7 +80,7 @@ dsh plugin add "/home/you/plugins/dsh-cursor-dev"
 安装收到的包：
 
 ```powershell
-dsh plugin add "D:/Downloads/dsh-cursor-dev-0.8.1.tgz"
+dsh plugin add "D:/Downloads/dsh-cursor-dev-0.9.0.tgz"
 ```
 
 终端没有 `dsh` 命令时，使用桌面插件管理即可。不要把在任意项目目录执行 `npm install` 当成已经在 DSH 当前 profile 中启用插件。
