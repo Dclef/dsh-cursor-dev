@@ -157,8 +157,11 @@ flowchart LR
 | `toolName` | `cursor_code` | 编码工具的注册名 |
 | `usageUi` | `true` | 是否挂载状态、额度和面板 HTTP 路由 |
 | `usageBaseUrl` | `https://api2.cursor.sh` | Cursor 额度 API 地址 |
+| `maxChildDepth` | `1` | Cursor 子会话允许达到的深度上限，调用方深度必须小于该值 |
 
 插件自动探测 CLI 的 PATH 和已知安装目录。当前实现不支持通过配置中的 `command` 覆盖探测结果，安装排错以[指南](docs/INSTALL.md#6-常见问题)为准。
+
+`maxChildDepth` 限制的是**谁能启动 Cursor 子会话**：深度为 `0` 的顶层智能体是正常调用方，深度 `1` 的子智能体再调用就会被拒绝（默认上限 `1`，即只允许父智能体创建子智能体）。拒绝发生在创建任何进程或子会话之前，`cursor_code` 立即返回 `sessionKey: "depth-refused"`，`cursor_subagent` 抛出同类错误，错误信息里带有当前深度和上限。宿主本身对 `subagent` / `subagent_fork` 的深度限制（面板「子智能体 → 运行限制 → 最大递归深度」）仍然生效；`cursor` provider 声明 `depthLimit: false`，无法接收数值型 `maxDepth`，所以这道限制由本插件自己执行。把 `maxChildDepth` 设为 `0` 可以完全禁止子会话，设为 `2` 或更大则允许更深一层。镜像历史（面板里的记录）不受此限制，仍可正常打开查看。
 
 插件设置与会话映射优先写入环境变量 `DSH_CURSOR_DEV_DATA` 指定的目录；否则使用 `%LOCALAPPDATA%/dsh-cursor-dev`；没有该环境变量时使用 DSH 提供的 `baseDir` 下的 `.data`（再无 `baseDir` 时回退到进程当前目录）。Cursor 登录和原始会话由 Cursor 自己保存。面板写操作包含同源检查，HTTP 可访问范围由 DSH 的监听配置决定。
 
@@ -169,7 +172,7 @@ npm install
 node --test --test-force-exit --test-skip-pattern="the child agent really edits a file|a bad model is rejected|the real Cursor account returns live quota data" "test/**/*.test.mjs"
 ```
 
-完整测试命令为 `npm test`，其中三个真实 CLI/账号测试需要 Cursor 登录和网络，执行任务会使用该账号额度。当前实现已通过 178 项离线测试，并完成两轮真实 Auto 调用、文件修改和上下文续接验证。打包使用 `npm pack` 或 `pnpm pack`，发布前按[分发检查](docs/INSTALL.md#7-维护者分发前检查)核对安装包和版本。
+完整测试命令为 `npm test`，其中三个真实 CLI/账号测试需要 Cursor 登录和网络，执行任务会使用该账号额度。当前实现已通过 185 项离线测试，并完成两轮真实 Auto 调用、文件修改和上下文续接验证。打包使用 `npm pack` 或 `pnpm pack`，发布前按[分发检查](docs/INSTALL.md#7-维护者分发前检查)核对安装包和版本。
 
 ## English
 
@@ -211,6 +214,8 @@ The current source registers a native DSH provider named `cursor` and a standard
 Cursor executes externally; a real DSH child session mirrors the transcript for inspection. Standard background runs use DSH's job result and cancellation tools. Persistent mailbox continuation through `send_message`, and Cursor as a resident Agent Teams teammate, are not implemented. Use `cursor_code` with `continueSession` for explicit follow-ups.
 
 The parent remains responsible for reviewing the actual changes and verification evidence. File reports have scan limits and are not a substitute for final workspace checks. Cursor model availability and usage depend on the Cursor account; the parent model uses its separate DSH provider configuration.
+
+`maxChildDepth` (default `1`) caps who may start a Cursor child session. A top-level agent at depth `0` is the intended caller; a subagent at depth `1` that calls `cursor_code` or `cursor_subagent` is refused before any process, child session, or reset is created — `cursor_code` returns `sessionKey: "depth-refused"` and the error names both the current depth and the cap. This exists because the `cursor` provider declares `depthLimit: false` and cannot accept a numeric `maxDepth` from the host's `tool-subagent`, so the plugin enforces the limit itself. Set it to `0` to forbid Cursor children entirely, or higher to allow deeper nesting. The host's own delegation limit for `subagent` / `subagent_fork` (panel → Subagents → Run limits → maximum recursion depth) still applies independently. Opening a mirrored child conversation in the panel is a read-only record and is not affected.
 
 ## License
 

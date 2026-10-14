@@ -28,6 +28,7 @@ import {
     CursorMirror,
     DESCRIPTOR_VERSION,
     PROVIDER_NAME,
+    assertChildDepth,
     catalogPayload,
     childSessionMeta,
     createMirrorHub,
@@ -362,6 +363,32 @@ test('the child inherits the parent route and is stamped with its depth', () => 
     assert.equal(options.subagentDepth, 1);
 });
 
+test('a depth cap admits a top-level parent and refuses one that already delegated', () => {
+    // The rule the platform itself defaults to: only depth 0 may delegate.
+    const top = { options: {}, session: { header: { id: 'top' } } };
+    const child = { options: { subagentDepth: 1 }, session: { header: { id: 'child', delegationDepth: 1 } } };
+    assert.equal(assertChildDepth(resolveChildDepth(top, 1), 1), 1);
+    assert.throws(() => resolveChildDepth(child, 1), /depth 2 exceeds maxDepth 1/);
+    // Depth 0 forbids children entirely; a higher cap allows a nested one.
+    assert.throws(() => resolveChildDepth(top, 0), /depth 1 exceeds maxDepth 0/);
+    assert.equal(resolveChildDepth(child, 2), 2);
+    // No cap keeps the previous, unbounded behaviour.
+    assert.equal(resolveChildDepth(child, undefined), 2);
+    // A depth that cannot be an exact integer is refused whatever the cap says.
+    assert.throws(() => assertChildDepth(Number.MAX_SAFE_INTEGER + 1, undefined), /safe-integer range/);
+});
+
+test('the durable header is the floor, so a resumed child cannot delegate as top-level', () => {
+    // A child is resumed with fresh options: counting it from zero would let it
+    // delegate as if it were the top-level agent.
+    const resumed = { options: {}, session: { header: { id: 'child', delegationDepth: 1 } } };
+    assert.equal(delegationDepthOf(resumed), 1);
+    assert.throws(() => resolveChildDepth(resumed, 1), /depth 2 exceeds maxDepth 1/);
+    // A runtime stamp deeper than the header still counts.
+    const deepened = { options: { subagentDepth: 3 }, session: { header: { id: 'child', delegationDepth: 1 } } };
+    assert.equal(delegationDepthOf(deepened), 3);
+});
+
 test('a child on a different route does not inherit the parent reasoning effort', () => {
     const parent = {
         options: { provider: 'workbuddy-ai', model: 'deepseek-v4.1-flash', reasoningEffort: 'max' },
@@ -577,6 +604,61 @@ test('a hub with no agent loop reports itself unavailable and mirrors nothing', 
     await hub.release('p::default#1');
     await hub.dropConversation('p::default');
     await hub.dispose();
+});
+
+test('the hub enforces its depth cap on every child it opens', async () => {
+    const created = [];
+    const agents = {
+        async create(options) {
+            created.push(options);
+            const session = fakeSession({ header: { id: options.sessionId, createdAt: 7 } });
+            const child = { id: options.sessionId, session };
+            options.setup?.({ get: () => undefined }, child);
+            return { agent: child, dispose: async () => {} };
+        },
+    };
+
+    // A top-level parent passes a cap of 1: this is the default configuration.
+    const { parent } = fakeParent();
+    const allowed = createMirrorHub({ maxChildDepth: 1 });
+    allowed.bind({ get: name => (name === 'agents' ? agents : undefined) });
+    const opened = await allowed.open({ key: 'top::default#1', parent, label: 'default' });
+    assert.ok(opened !== undefined);
+    assert.equal(created[0].meta.delegationDepth, 1, 'a top-level parent still gets a depth-1 child');
+    await allowed.dispose();
+
+    // A parent that is ALREADY a child is refused, and nothing is created.
+    const warnings = [];
+    const nested = { ...parent, options: { subagentDepth: 1 },
+        session: fakeSession({ header: { id: 'session-child', createdAt: 5, cwd: 'E:\\work', delegationDepth: 1 } }) };
+    const before = created.length;
+    const capped = createMirrorHub({ maxChildDepth: 1, logger: { warn: m => warnings.push(String(m)), info: () => {} } });
+    capped.bind({ get: name => (name === 'agents' ? agents : undefined) });
+    assert.equal(await capped.open({ key: 'child::default#1', parent: nested, label: 'default' }), undefined);
+    assert.equal(created.length, before, 'a refused delegation must not create a session');
+    assert.match(warnings.join('\n'), /exceeds maxDepth 1/);
+    await capped.dispose();
+
+    // A strict caller (the native provider) gets the refusal as an error.
+    await assert.rejects(
+        capped.open({ key: 'child::default#2', parent: nested, label: 'default', strict: true }),
+        /exceeds maxDepth 1/,
+    );
+    await capped.dispose();
+
+    // Raising the cap admits the same parent.
+    const raised = createMirrorHub({ maxChildDepth: 2 });
+    raised.bind({ get: name => (name === 'agents' ? agents : undefined) });
+    const deep = await raised.open({ key: 'child::default#3', parent: nested, label: 'default' });
+    assert.ok(deep !== undefined);
+    assert.equal(created.at(-1).meta.delegationDepth, 2);
+    await raised.dispose();
+
+    // No cap keeps the old unbounded behaviour, so existing hosts are unchanged.
+    const unbounded = createMirrorHub({});
+    unbounded.bind({ get: name => (name === 'agents' ? agents : undefined) });
+    assert.ok(await unbounded.open({ key: 'child::default#4', parent: nested, label: 'default' }) !== undefined);
+    await unbounded.dispose();
 });
 
 test('the live child set stays bounded; the oldest conversation is closed first', async () => {

@@ -253,6 +253,7 @@ test('every lib module imports and the entry point is a valid plugin', async () 
     assert.equal(config.maxScanFiles, 20000);
     assert.equal(config.usageUi, true);
     assert.equal(config.usageBaseUrl, 'https://api2.cursor.sh');
+    assert.equal(config.maxChildDepth, 1, 'only a top-level parent may start a Cursor child by default');
 });
 
 test('the package manifest is installable as a DSH bundle', async () => {
@@ -914,6 +915,58 @@ test('argument validation rejects an empty task', async () => {
     const result = await tool.execute({ task: '   ' }, { agent: { id: 'p' }, signal: new AbortController().signal });
     assert.equal(result.ok, false);
     assert.match(result.error, /task/i);
+});
+
+test('the depth cap refuses a nested Cursor run before anything is created', async () => {
+    const ran = [];
+    const tool = cursorCodeTool({
+        pool: {
+            persistedFor: () => undefined,
+            pickKey: () => ({ key: 'x#0', generation: 0 }),
+            run: async () => { ran.push('run'); throw new Error('must not run'); },
+            dropConversation: () => { ran.push('drop'); },
+        },
+        journal: new RunJournal({}),
+        index: { get: async () => undefined, delete: async () => { ran.push('delete'); } },
+        maxScanFiles: 10,
+        maxChildDepth: 1,
+    });
+    const signal = new AbortController().signal;
+
+    // Depth 0 — the top-level parent this tool is meant for — is admitted.
+    const top = { agent: { id: 'top', options: {}, session: { header: { id: 'top' } } }, signal };
+    const attempted = await tool.execute({ task: 'do the work', workspaceRoot: tmpdir() }, top);
+    assert.equal(attempted.ok, false);
+    assert.match(attempted.error, /must not run/, 'a top-level parent reaches the pool');
+    assert.deepEqual(ran, ['run'], 'and nothing else was touched');
+
+    // Depth 1 — a subagent calling this tool would create a GRANDCHILD.
+    ran.length = 0;
+    const nested = {
+        agent: { id: 'child', options: { subagentDepth: 1 }, session: { header: { id: 'child', delegationDepth: 1 } } },
+        signal,
+    };
+    const refused = await tool.execute({ task: 'do the work', workspaceRoot: tmpdir() }, nested);
+    assert.equal(refused.ok, false);
+    assert.equal(refused.sessionKey, 'depth-refused');
+    assert.match(refused.error, /depth 2 exceeds maxDepth 1/);
+    assert.match(refused.error, /maxChildDepth/, 'the refusal names the setting that lifts it');
+    assert.deepEqual(ran, [], 'no CLI process, no child session, no reset happened');
+});
+
+test('the depth cap is off when unset, so an unconfigured host keeps working', async () => {
+    const tool = cursorCodeTool({
+        pool: { persistedFor: () => undefined, pickKey: () => ({ key: 'x#0', generation: 0 }), run: async () => { throw new Error('reached the pool'); } },
+        journal: new RunJournal({}),
+        index: { get: async () => undefined },
+        maxScanFiles: 10,
+    });
+    const nested = {
+        agent: { id: 'child', options: { subagentDepth: 1 }, session: { header: { id: 'child', delegationDepth: 1 } } },
+        signal: new AbortController().signal,
+    };
+    const result = await tool.execute({ task: 'do the work', workspaceRoot: tmpdir() }, nested);
+    assert.match(result.error, /reached the pool/);
 });
 
 test('a missing Cursor CLI degrades the tool instead of failing the mount', async () => {

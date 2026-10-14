@@ -120,7 +120,7 @@ async function harness(t, options = {}) {
             return { agent: child, dispose: async () => { releases.push(child.id); } };
         },
     };
-    const mirrors = createMirrorHub({ maxChildren: 2 });
+    const mirrors = createMirrorHub({ maxChildren: 2, maxChildDepth: options.maxChildDepth });
     mirrors.bind({ get: key => key === 'agents' ? agents : undefined });
     const journal = new RunJournal();
     const saved = new Map();
@@ -128,7 +128,7 @@ async function harness(t, options = {}) {
     const pool = new SessionPool({ resolved: { command: 'fixture' }, env: {}, spawn: peer.spawn, maxLiveSessions: 8 }, (key, event) => {
         journal.append(key, event); mirrors.observe(key, event);
     });
-    const raw = cursorCodeTool({ pool, mirrors, journal, index,
+    const raw = cursorCodeTool({ pool, mirrors, journal, index, maxChildDepth: options.maxChildDepth,
         resolveModelSelection: requested => resolveModelSelection({ model: 'auto', modelPolicy: 'panel' }, '', requested) });
     const bridge = createNativeCursorBridge({ execute: raw.execute, mirrors });
     const providers = new Map();
@@ -324,6 +324,35 @@ test('native child creation fails closed and leaves no process or lifecycle even
     await assert.rejects(h.start(), /fixture child creation failed/);
     assert.equal(h.peer.peers.length, 0);
     assert.equal(h.lifecycle.length, 0);
+});
+
+test('a depth cap stops a subagent from reaching Cursor through the native provider', async t => {
+    const h = await harness(t, { maxChildDepth: 1 });
+    // The same native route, but the caller is a subagent (depth 1) instead of a
+    // top-level parent. Nothing may be created: no CLI process, no child
+    // conversation, and no lifecycle event published to the caller.
+    const nested = { id: 'nested-parent', options: { subagentDepth: 1 }, ctx: { get: () => undefined },
+        session: session('nested-parent', h.cwd) };
+    nested.session.header.delegationDepth = 1;
+    const provider = h.providers.get('cursor');
+    await assert.rejects(
+        provider.start({ parent: nested, prompt: [{ type: 'text', text: 'task' }], label: 'task' }),
+        /depth 2 exceeds maxDepth 1/,
+    );
+    assert.equal(h.peer.peers.length, 0, 'the CLI was never started');
+    assert.equal(h.children.size, 0, 'no child conversation was created');
+    assert.equal(h.lifecycle.length, 0, 'nothing was published to the caller');
+});
+
+test('the native provider still admits a top-level parent under the cap', async t => {
+    const h = await harness(t, { maxChildDepth: 1 });
+    const next = h.peer.next();
+    const run = await h.start('do the work');
+    (await next).finish();
+    const result = await run.result;
+    assert.equal(result.stopReason, 'completed');
+    assert.equal(h.lifecycle.length, 2, 'start and end both published');
+    await run.dispose();
 });
 
 test('host catalog failure cancels and disposes the unpublished run', async t => {
