@@ -38,13 +38,13 @@ agent status --format json
 
 ## 2. 选择安装来源
 
-**发布状态（2026-10-14 核对）：** 公共 GitHub 仓库存在，`0.9.1` 已推送到 `main`（原生 `cursor_subagent` 接入、面板模型锁定、父级专属的 `maxChildDepth` 递归限制和本指南都在其中）。npm 公共源尚未发布 `dsh-cursor-dev`，所以按包名安装会返回 404；插件市场（dshmarket）的收录 PR 仍在审核，合并前市场里搜不到本插件。
+**发布状态（2026-10-16 核对）：** 公共 GitHub 仓库存在，`0.10.0` 已推送到 `main`（原生 `cursor_subagent` 接入、面板模型锁定、父级专属的 `maxChildDepth` 递归限制、子进程代理探测与面板模型浏览器，以及本指南都在其中）。npm 公共源尚未发布 `dsh-cursor-dev`，所以按包名安装会返回 404；插件市场（dshmarket）的收录 PR 仍在审核，合并前市场里搜不到本插件。
 
 | 你要安装的内容 | 安装来源 |
 | --- | --- |
 | 公开仓库的当前版本（推荐） | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
 | 你本地的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
-| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.9.1.tgz` |
+| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.10.0.tgz` |
 
 表中的本地路径是示例，需要换成实际位置；包名里的版本以收到的文件为准。Git 来源会取得仓库默认分支的最新提交，而 `.tgz` 是某一刻的固定快照——要跟进后续改动就用 Git 来源。
 
@@ -80,7 +80,7 @@ dsh plugin add "/home/you/plugins/dsh-cursor-dev"
 安装收到的包：
 
 ```powershell
-dsh plugin add "D:/Downloads/dsh-cursor-dev-0.9.1.tgz"
+dsh plugin add "D:/Downloads/dsh-cursor-dev-0.10.0.tgz"
 ```
 
 终端没有 `dsh` 命令时，使用桌面插件管理即可。不要把在任意项目目录执行 `npm install` 当成已经在 DSH 当前 profile 中启用插件。

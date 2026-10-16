@@ -49,7 +49,7 @@ flowchart LR
 3. 按 DSH 提示完成加载；涉及后台代码更新时重启 DSH，然后刷新页面。在 Cursor 面板中选择模型并保存。
 4. 明确告诉父模型使用 `cursor_code`，或者用下面的斜杠命令派发第一个任务。
 
-**版本说明（2026-10-14 核对）：** `0.9.1` 已推送到公开仓库的 `main`，其中包含本文描述的原生子智能体接入、面板模型锁定、父级专属的 `maxChildDepth` 递归限制和[安装指南](docs/INSTALL.md)。npm 公共源尚未发布 `dsh-cursor-dev`，所以按包名安装会返回 404；插件市场（dshmarket）的收录仍在审核，合并前市场里搜不到本插件。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
+**版本说明（2026-10-16 核对）：** `0.10.0` 已推送到公开仓库的 `main`，其中包含本文描述的原生子智能体接入、面板模型锁定、父级专属的 `maxChildDepth` 递归限制、子进程代理探测与面板模型浏览器，以及[安装指南](docs/INSTALL.md)。npm 公共源尚未发布 `dsh-cursor-dev`，所以按包名安装会返回 404；插件市场（dshmarket）的收录仍在审核，合并前市场里搜不到本插件。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
 
 运行要求：DSH 包声明最低版本 `>=0.2.0-rc.1`；Node.js `^22.19.0 || >=24.0.0`；已登录且可访问服务的 Cursor CLI。原生子智能体功能需要 DSH 的 `subagents`、`agents` 服务，后台任务还需要对应任务服务，建议使用当前 DSH 桌面版。CLI 安装方法见 [Cursor 官方文档](https://cursor.com/docs/cli)。
 
@@ -208,7 +208,7 @@ See the [installation guide](docs/INSTALL.md) for detailed setup and troubleshoo
 3. Restart DSH when backend changes require it, then refresh the page. Open the Cursor panel under `/plugins/dsh-cursor-dev/`, select a model and save it.
 4. Ask the parent to use `cursor_code`, or send `/cursor-subagent` followed by a complete task. The command dispatches directly and hands a completion or failure summary back to the original parent.
 
-As checked on **2026-10-14**, version `0.9.1` is pushed to `main` on the public repository and carries the native-provider and model-lock work documented here plus the parent-only `maxChildDepth` recursion cap, together with [the install guide](docs/INSTALL.md). The package is not published to the public npm registry, so a bare package-name installation returns 404, and the dsh-market listing is still under review. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
+As checked on **2026-10-16**, version `0.10.0` is pushed to `main` on the public repository and carries the native-provider and model-lock work documented here plus the parent-only `maxChildDepth` recursion cap, child proxy detection and the model browser, together with [the install guide](docs/INSTALL.md). The package is not published to the public npm registry, so a bare package-name installation returns 404, and the dsh-market listing is still under review. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
 
 Requirements: DSH metadata declares `>=0.2.0-rc.1`; Node.js `^22.19.0 || >=24.0.0`; an authenticated Cursor CLI account with service access. Native dispatch additionally needs DSH's `subagents` and `agents` services, and background runs need the host's job services. A current DSH desktop installation is recommended.
 
