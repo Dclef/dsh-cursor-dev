@@ -116,6 +116,20 @@ test('normalizeSettings ignores values it cannot trust', () => {
     assert.equal(normalizeSettings(null).version, 1);
 });
 
+test('the proxy setting is text, bounded, and defaults to "ask the machine"', () => {
+    assert.equal(emptySettings().proxy, '', 'blank means "detect the system proxy", not "no proxy"');
+    assert.equal(normalizeSettings({ proxy: 'http://127.0.0.1:7890' }).proxy, 'http://127.0.0.1:7890');
+    assert.equal(normalizeSettings({ proxy: '  none  ' }).proxy, 'none');
+    assert.equal(normalizeSettings({ proxy: '' }).proxy, '');
+    assert.equal(normalizeSettings({ proxy: 7890 }).proxy, '', 'a number is not a proxy');
+    assert.equal(normalizeSettings({ proxy: ['http://a:1'] }).proxy, '');
+    // A settings file is JSON somebody can hand-edit, so a value that is too
+    // long to be a proxy is dropped rather than truncated: half a URL is worse
+    // than none.
+    assert.equal(normalizeSettings({ proxy: 'x'.repeat(5000) }).proxy, '');
+    assert.equal(normalizeSettings({ proxy: 'x'.repeat(200) }).proxy, 'x'.repeat(200));
+});
+
 test('writeSettings merges, and never leaves a half-written file behind', async () => {
     await withDataDir(async (dir) => {
         const first = writeSettings(dir, { model: 'kimi-k3-max' });
@@ -371,7 +385,15 @@ test('the settings API reports the state the panel needs to render', async () =>
         const { status, json } = await call(routes[0], {});
         assert.equal(status, 200);
         assert.equal(json.ok, true);
-        assert.deepEqual(json.settings, { model: 'kimi-k3-max', modelPolicy: 'per-call', mode: '', language: 'en', updatedAt: json.settings.updatedAt });
+        assert.deepEqual(json.settings, {
+            model: 'kimi-k3-max',
+            modelPolicy: 'per-call',
+            mode: '',
+            language: 'en',
+            proxy: '',
+            disabledModels: [],
+            updatedAt: json.settings.updatedAt,
+        });
         assert.equal(json.effectiveModel, 'kimi-k3-max', 'the panel choice is what a run would use');
         assert.equal(json.configModel, 'composer-2.5');
         assert.equal(json.agent.command, 'node.exe');
@@ -408,8 +430,49 @@ test('the settings API writes what the panel sends, and only that', async () => 
         assert.equal(planned.json.settings.mode, 'plan');
         assert.equal(readSettings(dir).mode, 'plan');
 
+        // A deny list is what keeps a 200-model catalogue usable for real work:
+        // switching a model off only hides it from the picker.
+        const denied = await call(route, {
+            method: 'POST',
+            body: JSON.stringify({ disabledModels: ['gpt-5.2-codex', 'auto', 'gpt-5.2-codex', ''] }),
+        });
+        assert.equal(denied.status, 200);
+        assert.deepEqual(denied.json.settings.disabledModels, ['gpt-5.2-codex', 'default[]'],
+            'duplicates drop and Auto is stored as the CLI id');
+        assert.deepEqual(readSettings(dir).disabledModels, ['gpt-5.2-codex', 'default[]']);
+
         const noBody = await call(route, { method: 'POST' });
         assert.equal(noBody.status, 200, 'an empty body is a read, not an error');
+    });
+});
+
+test('saving a proxy re-resolves it for the next spawn, not the next restart', async () => {
+    await withDataDir(async (dir) => {
+        const { ctx, routes } = fakeContext();
+        const spawn = fakeSpawn({ stdout: LISTING });
+        const refreshes = [];
+        registerSettingsRoutes(ctx, cliDeps(dir, spawn, {
+            refreshProxy: async () => { refreshes.push(readSettings(dir).proxy); return 'http://127.0.0.1:7890 (setting)'; },
+            proxyRoute: () => 'http://127.0.0.1:7890 (setting)',
+            proxyError: () => '',
+        }));
+        const route = routes[0];
+
+        const saved = await call(route, { method: 'POST', body: JSON.stringify({ model: 'auto', proxy: 'http://127.0.0.1:7890' }) });
+        assert.equal(saved.status, 200);
+        assert.equal(readSettings(dir).proxy, 'http://127.0.0.1:7890', 'the proxy lives beside the model choice');
+        assert.deepEqual(refreshes, ['http://127.0.0.1:7890'], 'the child environment is rebuilt on save');
+        assert.equal(saved.json.proxy.configured, 'http://127.0.0.1:7890');
+        assert.equal(saved.json.proxy.route, 'http://127.0.0.1:7890 (setting)', 'the panel is told which route results');
+
+        // A save that does not touch the proxy must not rebuild the child env.
+        await call(route, { method: 'POST', body: JSON.stringify({ model: 'composer-2.5' }) });
+        assert.equal(refreshes.length, 1);
+
+        // …and an unusable value is stored verbatim while the host explains it.
+        const broken = await call(route, { method: 'POST', body: JSON.stringify({ proxy: 'not a proxy' }) });
+        assert.equal(broken.json.settings.proxy, 'not a proxy');
+        assert.deepEqual(refreshes, ['http://127.0.0.1:7890', 'not a proxy']);
     });
 });
 

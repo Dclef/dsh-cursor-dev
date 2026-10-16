@@ -162,6 +162,37 @@ async function withPool(run) {
     }
 }
 
+test('a spawn reads the environment when it starts, not when the pool was built', async () => {
+    const stub = fakeAcp();
+    const specs = [];
+    const cwd = mkdtempSync(join(tmpdir(), 'dsh-cursor-env-'));
+    let env = { PATH: 'C:\\bin' };
+    const pool = new SessionPool({
+        resolved: { command: 'stub', entry: undefined },
+        // A function, because the panel can save a proxy while the app is
+        // running: a snapshot taken here would pin every later run to the old
+        // route, and the operator would have to restart to be believed.
+        env: () => env,
+        spawn: spec => { specs.push(spec); return stub.spawn(spec); },
+        maxLiveSessions: 4,
+    }, () => { });
+    try {
+        await turn(pool, cwd, 'conv-a', undefined);
+        assert.equal(specs.length, 1);
+        assert.deepEqual(specs[0].env, { PATH: 'C:\\bin' }, 'the environment reaches the child unchanged');
+
+        env = { PATH: 'C:\\bin', HTTPS_PROXY: 'http://127.0.0.1:7890' };
+        await turn(pool, cwd, 'conv-b', undefined);
+        assert.equal(specs.length, 2);
+        assert.equal(specs[1].env.HTTPS_PROXY, 'http://127.0.0.1:7890', 'the next spawn sees the new proxy');
+        assert.equal(specs[0].env.HTTPS_PROXY, undefined, 'the earlier spec is left as it was');
+    }
+    finally {
+        await pool.dispose();
+        stub.stop();
+    }
+});
+
 test('an alias of the in-effect variant reuses the live generation', async () => {
     await withPool(async (pool, cwd, stub) => {
         const first = await turn(pool, cwd, 'conv', 'composer-2.5-fast');

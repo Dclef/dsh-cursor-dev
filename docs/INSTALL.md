@@ -105,6 +105,26 @@ http://127.0.0.1:19387/plugins/dsh-cursor-dev/
 
 `auto` 与 `default[]` 都表示 Auto。面板保存的选择与当前已启动任务的模型不是同一项状态；新选择在后续运行时应用。锁定只决定选用哪个模型，不增加账号额度或模型访问权限。
 
+### 模型列表不全时先看代理
+
+同一张卡片上有 **代理** 输入框，留空即为自动探测，正常情况不需要填。它决定的是**插件启动的 CLI 子进程**走哪条网络出口。
+
+Cursor CLI 只读 `HTTPS_PROXY` / `HTTP_PROXY`（以及小写形式），不读注册表，也不读 `ALL_PROXY`。代理只写在 Windows「Internet 选项」里的机器，子进程会直连 Cursor，而直连只返回模型目录的一部分——本机实测 `agent --list-models` 为 31 个（走代理 265 个），面板真正使用的 ACP 清单为 10 个（走代理 46 个）。
+
+自检步骤：
+
+1. 打开 `http://<你的 DSH 地址>/plugins/dsh-cursor-dev/`。
+2. 看「子智能体模型」卡片：**可选模型** 那一行末尾会显示 **子进程出口**，例如 `http://127.0.0.1:7890 (registry:Internet Settings)`。
+3. 如果显示 `direct (no proxy configured)`，而你的机器确实有代理，就在 **代理** 框里填上地址（如 `http://127.0.0.1:7890`）并点保存。保存后立即生效，不需要重启应用；面板会自动重新读取模型列表。
+4. 想强制直连时填 `none`。
+
+也可以在终端里直接对照，两个数字应当与面板一致：
+
+```powershell
+agent --list-models | Measure-Object -Line                       # 直连
+$env:HTTPS_PROXY='http://127.0.0.1:7890'; agent --list-models | Measure-Object -Line
+```
+
 升级后仍看不到锁定选项时，先确认安装的代码确实包含该功能，再完整重启 DSH。仅刷新浏览器不会重新加载已缓存的后台 JavaScript。旧版进程可能在刷新设置时丢弃新字段，因此应在新版进程启动后再保存锁定设置。
 
 ## 4. 做一次完整验证
@@ -162,7 +182,7 @@ continueSession 设为 true。让 Cursor 说明上一轮做了什么，再核对
 | 现象 | 检查与处理 |
 | --- | --- |
 | 按包名安装返回 404 | npm 公共源尚未发布；改用上面的 Git 来源、已取得的源码目录或安装包 |
-| DSH 报告找不到 Cursor CLI | 检查 `agent status --format json`；确认 CLI 位于 DSH 可见的 PATH 或常见安装目录，然后重启 DSH。当前代码不会应用插件配置中的 `command` 覆盖项 |
+| DSH 报告找不到 Cursor CLI | 检查 `agent status --format json`；确认 CLI 位于 DSH 可见的 PATH 或常见安装目录，然后重启 DSH。仍找不到时，在插件配置里设置 `command` 为可启动二进制、安装根目录、`agent.cmd`，或 `"node.exe" "index.js"`（非空时只走该路径） |
 | 未登录或账号不可用 | 在运行 DSH 的同一操作系统用户下执行 `agent login`，检查账号和网络状态 |
 | 面板选了 Auto，实际仍是其他模型 | 当前任务不会中途切换；新版请保存“锁定面板模型”。查看返回的 `modelSource` 与 `requestedModel`，确认是否有显式调用参数 |
 | 显示 usage limit | 检查 Cursor 账号额度和模型可用性；更换父模型不会改变 Cursor 账号额度 |

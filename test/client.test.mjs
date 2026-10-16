@@ -325,6 +325,27 @@ test('a reachable host route mounts the dashboard frame', async () => {
     assert.equal(element.props.style.height, '100%');
 });
 
+test('the Settings slot pins a definite frame height instead of a percentage', () => {
+    const react = makeReact();
+    const { exports } = loadBundle({ react: react.api });
+    const slots = fakeSlots();
+    exports.apply(fakeContext({ slots: slots.service }).ctx);
+    const page = render(slots.calls.register[0].component, react);
+    const slot = page.children[page.children.length - 1];
+
+    // The host wraps a `settings.section` child in an auto-height box, so a
+    // percentage height never resolves and the frame silently falls back to
+    // the browser's 150px iframe default — the dashboard then looks like a
+    // two-line stub. The slot must carry a height of its own.
+    assert.equal(
+        slot.props.style.height,
+        'min(72vh, 640px)',
+        'the slot hands the frame a viewport-sized, definite height',
+    );
+    assert.equal(slot.props.style.minHeight, '320px', 'and never collapses to a sliver');
+    assert.equal(slot.props.style.overflow, 'hidden', 'the dashboard scrolls inside the frame, not the page');
+});
+
 test('an unreachable host route explains itself instead of showing an empty pane', async () => {
     const react = makeReact();
     const frame = settingsFrame(react);

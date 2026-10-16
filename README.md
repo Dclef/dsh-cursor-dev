@@ -159,7 +159,23 @@ flowchart LR
 | `usageBaseUrl` | `https://api2.cursor.sh` | Cursor 额度 API 地址 |
 | `maxChildDepth` | `1` | Cursor 子会话允许达到的深度上限，调用方深度必须小于该值 |
 
-插件自动探测 CLI 的 PATH 和已知安装目录。当前实现不支持通过配置中的 `command` 覆盖探测结果，安装排错以[指南](docs/INSTALL.md#6-常见问题)为准。
+插件自动探测 CLI 的 PATH 和已知安装目录。探测失败时，可在插件配置里设置 `command` 指向可启动的二进制、安装根目录、`agent.cmd`，或 `"node.exe" "index.js"`；非空时只使用该路径，不再回退到自动探测。安装排错以[指南](docs/INSTALL.md#6-常见问题)为准。
+
+### 代理设置
+
+面板的「子智能体模型」卡片里有**代理**输入框，未设置时默认为空。
+
+| 取值 | 含义 |
+| --- | --- |
+| 留空（默认） | 自动探测：先看 `HTTPS_PROXY` 等环境变量，再看 Windows「Internet 选项」里的代理 |
+| `none` | 直连，不用代理 |
+| `http://127.0.0.1:7890` | 显式指定代理，优先于环境变量和注册表 |
+
+**为什么需要它：** Cursor CLI 只读 `HTTPS_PROXY` / `HTTP_PROXY` / `https_proxy` / `http_proxy`——不读注册表，也不读 `ALL_PROXY`。所以一台只把代理写在「Internet 选项」里的机器，插件启动的 CLI 子进程会直连 Cursor，而直连只会拿到模型目录里的**一小部分**：本机实测 `agent --list-models` 为 **31 个**（走代理 **265 个**），ACP 会话清单为 **10 个**（走代理 **46 个**）。这就是「有些模型看不到」的全部原因。
+
+留空即自动探测，所以正常情况下不需要配置任何东西；插件会把探测到的地址写进子进程环境（`HTTPS_PROXY`、`HTTP_PROXY` 及小写形式），并在模型卡片的「可选模型」那一行末尾显示**子进程出口**。面板保存后立刻生效，不必重启应用；如果填的值解析不了，那一行会直接说明。
+
+模型卡片下方还有可搜索的模型浏览器：点一行设为面板模型，右边的开关决定它是否出现在上方下拉框里。关掉的模型只是藏起来（写入 `disabledModels`），点「保存」后生效，随时可以再打开——这样在完整目录有上百个模型时也能只留下写业务常用的几条。
 
 `maxChildDepth` 限制的是**谁能启动 Cursor 子会话**：深度为 `0` 的顶层智能体是正常调用方，深度 `1` 的子智能体再调用就会被拒绝（默认上限 `1`，即只允许父智能体创建子智能体）。拒绝发生在创建任何进程或子会话之前，`cursor_code` 立即返回 `sessionKey: "depth-refused"`，`cursor_subagent` 抛出同类错误，错误信息里带有当前深度和上限。宿主本身对 `subagent` / `subagent_fork` 的深度限制（面板「子智能体 → 运行限制 → 最大递归深度」）仍然生效；`cursor` provider 声明 `depthLimit: false`，无法接收数值型 `maxDepth`，所以这道限制由本插件自己执行。把 `maxChildDepth` 设为 `0` 可以完全禁止子会话，设为 `2` 或更大则允许更深一层。镜像历史（面板里的记录）不受此限制，仍可正常打开查看。
 
@@ -216,6 +232,20 @@ Cursor executes externally; a real DSH child session mirrors the transcript for 
 The parent remains responsible for reviewing the actual changes and verification evidence. File reports have scan limits and are not a substitute for final workspace checks. Cursor model availability and usage depend on the Cursor account; the parent model uses its separate DSH provider configuration.
 
 `maxChildDepth` (default `1`) caps who may start a Cursor child session. A top-level agent at depth `0` is the intended caller; a subagent at depth `1` that calls `cursor_code` or `cursor_subagent` is refused before any process, child session, or reset is created — `cursor_code` returns `sessionKey: "depth-refused"` and the error names both the current depth and the cap. This exists because the `cursor` provider declares `depthLimit: false` and cannot accept a numeric `maxDepth` from the host's `tool-subagent`, so the plugin enforces the limit itself. Set it to `0` to forbid Cursor children entirely, or higher to allow deeper nesting. The host's own delegation limit for `subagent` / `subagent_fork` (panel → Subagents → Run limits → maximum recursion depth) still applies independently. Opening a mirrored child conversation in the panel is a read-only record and is not affected.
+
+### Proxy
+
+The **子智能体模型** card carries a **proxy** box, empty by default.
+
+| Value | Meaning |
+| --- | --- |
+| empty (default) | detect it: `HTTPS_PROXY` and friends first, then the Windows Internet Settings proxy |
+| `none` | never proxy |
+| `http://127.0.0.1:7890` | that proxy, ahead of both of the above |
+
+Why it exists: the Cursor CLI reads `HTTPS_PROXY` / `HTTP_PROXY` / `https_proxy` / `http_proxy` and nothing else — not the Windows registry, and not `ALL_PROXY`. On a machine whose only proxy lives in Internet Settings, the CLI child therefore reaches Cursor directly, and the direct route publishes only a fraction of the catalogue: measured on this machine, `agent --list-models` answers **31** models directly and **265** through the proxy, while the ACP roster the picker actually uses goes from **10** to **46**. That is the whole of the "some models are missing" symptom.
+
+Leaving the box empty already fixes it, so no configuration is normally needed: the plugin resolves the route, writes `HTTPS_PROXY`/`HTTP_PROXY` (and the lowercase spellings) into every child process it starts, and shows the result as **子进程出口** at the end of the *available models* line. Saving takes effect on the next spawn rather than the next restart, and a value that cannot be parsed is reported on that same line instead of being silently ignored.
 
 ## License
 

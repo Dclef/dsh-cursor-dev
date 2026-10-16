@@ -15,13 +15,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, readdir, mkdir, rm } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { resolveAgent, acpArgv } from '../lib/resolve-agent.js';
-import { SessionPool, storeKeyOf } from '../lib/session-pool.js';
+import { SessionPool, storeKeyOf, conversationKeyOf } from '../lib/session-pool.js';
 import { normalizeAcpDiff } from '../lib/cursor-session.js';
 import { RunJournal } from '../lib/journal.js';
 import { ConversationIndex } from '../lib/conversations.js';
@@ -29,6 +29,7 @@ import { cursorCodeTool, resolveDataDir } from '../lib/tool.js';
 import { UsageClient, normalizeUsage, authFilePath, readAccessToken, registerUsageRoutes } from '../lib/usage.js';
 import { fingerprint, compareFingerprints, mergeChanges, diffStats } from '../lib/changes.js';
 import { buildPrompt, summarizeTask } from '../lib/prompt.js';
+import { writeSettings } from '../lib/settings.js';
 
 const here = fileURLToPath(new URL('..', import.meta.url));
 /** The resolved Cursor CLI on this machine, or undefined when not installed. */
@@ -140,6 +141,18 @@ test('prompt scaffolding keeps the parent task verbatim', () => {
 test('store keys drop the generation suffix', () => {
     assert.equal(storeKeyOf('agent-1::default#3'), 'agent-1::default#0');
     assert.equal(storeKeyOf('agent-1::default'), 'agent-1::default');
+});
+
+test('the durable key is the bare conversation key, not generation #0', () => {
+    // These two differ on purpose: storeKeyOf normalises to generation #0 for
+    // the pool's own bookkeeping, while the durable conversation index is
+    // written under the bare key (lib/tool.js stores `${parentId}::${label}`).
+    // The panel lists live rows under the generation-scoped key, so the restore
+    // route has to normalise with this one or every live row 404s.
+    assert.equal(conversationKeyOf('agent-1::default#3'), 'agent-1::default');
+    assert.equal(conversationKeyOf('agent-1::default#0'), 'agent-1::default');
+    assert.equal(conversationKeyOf('agent-1::default'), 'agent-1::default');
+    assert.notEqual(conversationKeyOf('agent-1::default#3'), storeKeyOf('agent-1::default#3'));
 });
 
 test('fingerprint catches adds, edits and deletes', async () => {
@@ -651,6 +664,18 @@ test('usage routes register against the host contract and answer HTTP', async ()
         assert.equal(restored[1].label, 'default', 'the child keeps the run label');
         assert.equal(index.get('a::default').childSessionId, 'session-restored', 'the id is remembered for the next page load');
 
+        // Every key the panel shows for a LIVE row is generation-scoped, while
+        // the durable index only knows the conversation-scoped one. Clicking
+        // "read it back" on a live row used to answer `no durable conversation
+        // for that key` for exactly that reason.
+        const scoped = await call('/plugins/dsh-cursor-dev/api/restore', '/plugins/dsh-cursor-dev/api/restore?key=' + encodeURIComponent('a::default#1'), { method: 'POST' });
+        assert.equal(scoped.status, 200, 'a generation-scoped key still finds its durable conversation');
+        assert.equal(JSON.parse(scoped.body).ok, true);
+        assert.equal(restored[3].key, 'a::default', 'the durable key is what the restored child is published under');
+        assert.equal(restored[3].label, 'default', 'the generation suffix never leaks into the child label');
+        assert.equal(restored[3].parentSessionId, 'a', 'the parent is read off the durable key');
+        assert.equal(index.get('a::default#1'), undefined, 'nothing is written under the pool key');
+
         // Bad input is answered, never thrown at the host.
         const wrongMethod = await call('/plugins/dsh-cursor-dev/api/restore', '/plugins/dsh-cursor-dev/api/restore?key=a::default');
         assert.equal(wrongMethod.status, 405);
@@ -1057,6 +1082,57 @@ test('a missing Cursor CLI degrades the tool instead of failing the mount', asyn
     assert.equal(statusBody.setup.login, 'agent login');
 
     await safeRemove(dataDir);
+});
+
+test('the proxy a panel saves is the one the child process starts with', async () => {
+    // The setting exists because the Cursor CLI reads HTTPS_PROXY/HTTP_PROXY and
+    // nothing else — not the Windows registry, not ALL_PROXY — so a machine
+    // whose only proxy lives in Internet Settings gets a child that reaches the
+    // API directly and lists a fraction of the models. This mounts the real
+    // plugin against a stand-in CLI that records the environment it was born
+    // with, which is the only place the answer is observable.
+    const plugin = await import('../lib/index.js');
+    const dataDir = await mkdtemp(join(tmpdir(), 'dsh-proxy-data-'));
+    const binDir = await mkdtemp(join(tmpdir(), 'dsh-proxy-bin-'));
+    const routes = new Map();
+    const server = { register: route => { routes.set(route.path, route); return () => routes.delete(route.path); } };
+    const ctx = {
+        logger: { info: () => {}, warn: () => {}, error: () => {} },
+        tools: { register: () => () => {} },
+        subprocess: { spawn: testSpawn },
+        get: name => (name === 'baseDir' ? dataDir : undefined),
+        inject: (deps, callback) => callback({
+            get: name => (name === 'webServer' ? server : undefined),
+            effect: factory => { factory(); return () => {}; },
+        }),
+        effect: () => {},
+    };
+    try {
+        const seen = join(binDir, 'seen.txt');
+        const stub = join(binDir, 'agent-stub.mjs');
+        await writeFile(stub, `import { writeFileSync } from 'node:fs';\n`
+            + `writeFileSync(${JSON.stringify(seen)}, process.env.HTTPS_PROXY ?? 'none');\n`);
+        writeSettings(dataDir, { proxy: 'http://127.0.0.1:7890' });
+        plugin.apply(ctx, new plugin.Config({
+            command: `${JSON.stringify(process.execPath)} ${JSON.stringify(stub)}`,
+        }));
+
+        const status = routes.get('/plugins/dsh-cursor-dev/status');
+        assert.ok(status !== undefined, 'the status route mounts');
+        const chunks = [];
+        await status.handler({ url: '/plugins/dsh-cursor-dev/status' }, {
+            writeHead: () => {},
+            end: body => { chunks.push(body); },
+        });
+        assert.equal(readFileSync(seen, 'utf8'), 'http://127.0.0.1:7890',
+            'the CLI child must start with the proxy the panel saved');
+        // The panel is told the route that resulted, not just what was typed.
+        assert.match(JSON.parse(chunks.join('')).agent.command, /node\.exe$/i);
+    }
+    finally {
+        await safeRemove(dataDir);
+        await safeRemove(binDir);
+    }
 });
 
 /**

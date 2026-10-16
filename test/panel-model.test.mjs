@@ -54,7 +54,8 @@ async function panel(t) {
     const executable = source.replace('\n  applyLanguage();\n', `
   globalThis.panelTest = {
     renderModel: renderModel, modelCell: modelCell,
-    configure: function(value, list) { settings = value; models = list || []; }
+    configure: function(value, list) { settings = value; models = list || []; },
+    setProxy: function(value) { proxyRoute = value.route || ''; proxyError = value.error || ''; }
   };
   return;
   applyLanguage();
@@ -91,6 +92,35 @@ test('the panel saves Auto and the lock together', async t => {
     ui.nodes.get('model-lock').checked = true;
     ui.nodes.get('model-save').listeners.click();
     await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(JSON.parse(ui.requests[0].options.body), { model: 'default[]', modelPolicy: 'panel' });
+    assert.deepEqual(JSON.parse(ui.requests[0].options.body), {
+        model: 'default[]', modelPolicy: 'panel', proxy: '', disabledModels: [],
+    });
     assert.match(ui.nodes.get('model-state').textContent, /已锁定模型/);
+});
+
+test('the panel saves the proxy and re-reads the list it explains', async t => {
+    const ui = await panel(t);
+    ui.configure({ model: 'auto', proxy: '' }, [{ id: 'default[]', name: 'Auto' }]);
+    ui.renderModel();
+    ui.nodes.get('proxy').value = 'http://127.0.0.1:7890';
+    ui.nodes.get('model-save').listeners.click();
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(JSON.parse(ui.requests[0].options.body).proxy, 'http://127.0.0.1:7890');
+    // A new route reaches a different catalogue, so the list on screen is now a
+    // fact about the old one and has to be re-read.
+    assert.deepEqual(ui.requests.map(request => request.url), [
+        '/plugins/dsh-cursor-dev/api/settings',
+        '/plugins/dsh-cursor-dev/api/settings?refreshModels=1',
+    ]);
+});
+
+test('the panel says which route a child actually takes', async t => {
+    const ui = await panel(t);
+    ui.configure({ model: 'auto', proxy: '' }, [{ id: 'default[]', name: 'Auto' }]);
+    ui.setProxy({ route: 'http://127.0.0.1:7890 (registry)', error: '' });
+    ui.renderModel();
+    // The route, not the box, is what explains the model count.
+    assert.match(ui.nodes.get('model-state').textContent, /子进程出口：http:\/\/127\.0\.0\.1:7890 \(registry\)/);
+    assert.equal(ui.nodes.get('proxy').placeholder, '留空 = 自动检测系统代理 · none = 直连');
 });

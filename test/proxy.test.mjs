@@ -10,8 +10,49 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseProxy, hostBypassed, readSystemProxy, describeProxy, proxyAwareFetch } from '../lib/proxy.js';
+import { parseProxy, hostBypassed, readSystemProxy, describeProxy, proxyAwareFetch, proxySettingIsDirect, withProxyEnvironment, resolveChildProxy } from '../lib/proxy.js';
 import { UsageClient } from '../lib/usage.js';
+
+test('a proxy becomes the variables the child CLI actually reads', () => {
+    // The Cursor CLI honours HTTPS_PROXY/HTTP_PROXY and ignores ALL_PROXY, so
+    // ALL_PROXY must never be the only thing a child is handed.
+    const env = withProxyEnvironment({ PATH: 'C:\\bin', ALL_PROXY: 'http://ignored:1' }, { host: '127.0.0.1', port: 7890, scheme: 'http' });
+    assert.equal(env.HTTPS_PROXY, 'http://127.0.0.1:7890');
+    assert.equal(env.HTTP_PROXY, 'http://127.0.0.1:7890');
+    assert.equal(env.https_proxy, 'http://127.0.0.1:7890');
+    assert.equal(env.http_proxy, 'http://127.0.0.1:7890');
+    assert.equal(env.ALL_PROXY, 'http://ignored:1', 'an unrelated variable is left alone');
+    assert.equal(env.PATH, 'C:\\bin', 'the rest of the environment survives');
+    // Nothing is added when there is no proxy, and nothing is fought over when
+    // the operator already exported one.
+    assert.deepEqual(withProxyEnvironment({ PATH: 'C:\\bin' }, undefined), { PATH: 'C:\\bin' });
+    assert.equal(withProxyEnvironment({ HTTPS_PROXY: 'http://kept:1' }, undefined).HTTPS_PROXY, 'http://kept:1');
+});
+
+test('the proxy setting says what it means, including "none"', async () => {
+    assert.equal(proxySettingIsDirect('none'), true);
+    assert.equal(proxySettingIsDirect(' DIRECT '), true);
+    assert.equal(proxySettingIsDirect('off'), true);
+    assert.equal(proxySettingIsDirect('http://127.0.0.1:7890'), false);
+    assert.equal(proxySettingIsDirect(''), false);
+
+    // An explicit value wins over the environment and the registry…
+    const explicit = await resolveChildProxy('http://explicit:8080', { env: { HTTPS_PROXY: 'http://env:1' } });
+    assert.equal(explicit.host, 'explicit');
+    assert.equal(explicit.port, 8080);
+    assert.equal(explicit.source, 'setting');
+    // …and "none" means direct even when the machine has a proxy configured.
+    assert.equal(await resolveChildProxy('none', { env: { HTTPS_PROXY: 'http://env:1' } }), undefined);
+    // An empty setting is the documented default: ask the environment, then the
+    // machine, which is what makes the full catalogue appear unconfigured.
+    const inherited = await resolveChildProxy('', { env: { HTTPS_PROXY: 'http://env:1' } });
+    assert.equal(inherited.host, 'env');
+    assert.equal(inherited.port, 1);
+    assert.notEqual(inherited.source, 'setting');
+    // A value that is neither blank nor usable is not silently reinterpreted.
+    assert.equal(await resolveChildProxy('not a proxy', { env: {}, platform: 'linux' }), undefined);
+    assert.equal(await resolveChildProxy('not a proxy', { env: {} }), undefined);
+});
 
 test('parseProxy accepts every shape the environment and the registry use', () => {
     assert.deepEqual(parseProxy('127.0.0.1:7890'), { host: '127.0.0.1', port: 7890, scheme: 'http' });
