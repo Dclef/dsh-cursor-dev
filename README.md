@@ -46,10 +46,16 @@ flowchart LR
    dsh plugin add "git+https://github.com/Dclef/dsh-cursor-dev.git"
    ```
 
+   `0.11.0` 起也已发布到 npm 公共源，可以改用包名安装：
+
+   ```sh
+   dsh plugin add dsh-cursor-dev
+   ```
+
 3. 按 DSH 提示完成加载；涉及后台代码更新时重启 DSH，然后刷新页面。在 Cursor 面板中选择模型并保存。
 4. 明确告诉父模型使用 `cursor_code`，或者用下面的斜杠命令派发第一个任务。
 
-**版本说明（2026-10-17 核对）：** `0.11.0` 已推送到公开仓库的 `main`，适配 DSH `0.2.1-rc.2`：插件改用新的外部子智能体契约（`startActivation`、必须返回未被占用的子会话 id、External 行由宿主写入），在包顶层声明 `engines.dsh: ^0.2.0-rc.1`，并清理了 DSH 0.2.1 已删除的工具配置项。插件市场（dshmarket）已收录本插件（目录条目合并于 2026-10-17），可以直接在市场里找到并安装；npm 公共源仍未发布，所以按包名安装会返回 404。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
+**版本说明（2026-10-17 核对）：** `0.11.0` 已推送到公开仓库的 `main`，适配 DSH `0.2.1-rc.2`：插件改用新的外部子智能体契约（`startActivation`、必须返回未被占用的子会话 id、External 行由宿主写入），在包顶层声明 `engines.dsh: ^0.2.0-rc.1`，并清理了 DSH 0.2.1 已删除的工具配置项。插件市场（dshmarket）已收录本插件（目录条目合并于 2026-10-17），可以直接在市场里找到并安装；`0.11.0` 也已发布到 npm 公共源（包名 `dsh-cursor-dev`），按包名安装不再返回 404，目录下一次探测后市场卡片会显示版本和 `DSH ^0.2.0-rc.1` 宿主要求。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
 
 运行要求：DSH 包声明 `^0.2.0-rc.1`（已在 `0.2.1-rc.2` 上验证）；Node.js `^22.19.0 || >=24.0.0`；已登录且可访问服务的 Cursor CLI。原生子智能体功能需要 DSH 的 `subagents`、`agents` 服务，后台任务还需要对应任务服务，建议使用当前 DSH 桌面版。CLI 安装方法见 [Cursor 官方文档](https://cursor.com/docs/cli)。
 
@@ -205,10 +211,16 @@ See the [installation guide](docs/INSTALL.md) for detailed setup and troubleshoo
    dsh plugin add "git+https://github.com/Dclef/dsh-cursor-dev.git"
    ```
 
+   From `0.11.0` on the package is also published to the public npm registry, so the bare name works:
+
+   ```sh
+   dsh plugin add dsh-cursor-dev
+   ```
+
 3. Restart DSH when backend changes require it, then refresh the page. Open the Cursor panel under `/plugins/dsh-cursor-dev/`, select a model and save it.
 4. Ask the parent to use `cursor_code`, or send `/cursor-subagent` followed by a complete task. The command dispatches directly and hands a completion or failure summary back to the original parent.
 
-As checked on **2026-10-17**, version `0.11.0` is pushed to `main` on the public repository and adapts the plugin to DSH `0.2.1-rc.2`: it follows the new external-subagent contract (`startActivation`, a child id the host has not registered yet, and the `External` catalog row written by the host), declares `engines.dsh: ^0.2.0-rc.1` at the package top level, and drops the tool-config keys that DSH 0.2.1 removed. The dsh-market catalog already lists this plugin (entry merged 2026-10-17), so it can be installed from the market; the package is still not published to the public npm registry, so a bare package-name installation returns 404. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
+As checked on **2026-10-17**, version `0.11.0` is pushed to `main` on the public repository and adapts the plugin to DSH `0.2.1-rc.2`: it follows the new external-subagent contract (`startActivation`, a child id the host has not registered yet, and the `External` catalog row written by the host), declares `engines.dsh: ^0.2.0-rc.1` at the package top level, and drops the tool-config keys that DSH 0.2.1 removed. The dsh-market catalog already lists this plugin (entry merged 2026-10-17), so it can be installed from the market; version `0.11.0` is also published to the public npm registry as `dsh-cursor-dev`, so a bare package-name installation works and the market card shows the version and the `DSH ^0.2.0-rc.1` host requirement after the catalog's next probe. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
 
 Requirements: DSH metadata declares `^0.2.0-rc.1` (verified against `0.2.1-rc.2`); Node.js `^22.19.0 || >=24.0.0`; an authenticated Cursor CLI account with service access. Native dispatch additionally needs DSH's `subagents` and `agents` services, and background runs need the host's job services. A current DSH desktop installation is recommended.
 
