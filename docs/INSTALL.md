@@ -11,7 +11,7 @@
 - 可正常对话的 DSH，以及一个支持工具调用的父模型。
 - 插件使用的 Node.js 满足 `^22.19.0 || >=24.0.0`。桌面版应检查其自带运行时，终端里的 `node --version` 不一定是桌面程序使用的版本。
 - 当前版 Cursor CLI，已完成登录，并有执行任务所需的账号权限、额度和网络连接。
-- 原生子智能体入口需要 DSH 的 `subagents`、`agents` 服务；后台运行还需要宿主任务服务。包声明的 DSH 版本为 `^0.2.0-rc.1`（已在 `0.2.1-rc.2` 上验证），建议使用当前桌面版及其标准 profile。
+- 原生子智能体入口需要 DSH 的 `subagents`、`agents` 服务；后台运行还需要宿主任务服务。包声明的 DSH 版本为 `>=0.2.1-rc.2 <0.3.0-0`（已在 `0.2.1-rc.2` 上验证），建议使用当前桌面版及其标准 profile。
 
 父模型的 API 配置与 Cursor 登录分别管理。插件使用本机 CLI 的登录状态，无需再向插件填写一份 Cursor API Key。
 
@@ -38,15 +38,15 @@ agent status --format json
 
 ## 2. 选择安装来源
 
-**发布状态（2026-10-17 核对）：** 公共 GitHub 仓库存在，`0.11.0` 已推送到 `main`（适配 DSH `0.2.1-rc.2` 的外部子智能体契约、顶层 `engines.dsh`、面板模型锁定、父级专属的 `maxChildDepth` 递归限制，以及本指南都在其中）。插件市场（dshmarket）的目录条目已于 2026-10-17 合并，可以直接在市场里找到本插件；`0.11.0` 也已发布到 npm 公共源（包名 `dsh-cursor-dev`），按包名安装不再返回 404，目录下一次探测后市场会显示版本和 `DSH ^0.2.0-rc.1` 宿主要求。
+**发布状态（2026-10-17 核对）：** 公共 GitHub 仓库存在，`0.11.1` 已推送到 `main`（适配 DSH `0.2.1-rc.2` 的外部子智能体契约、顶层 `engines.dsh: >=0.2.1-rc.2 <0.3.0-0`、面板模型锁定、父级专属的 `maxChildDepth` 递归限制，以及本指南都在其中）。插件市场（dshmarket）的目录条目已于 2026-10-17 合并，可以直接在市场里找到本插件；`0.11.1` 已发布到 npm 公共源（包名 `dsh-cursor-dev`），按包名安装不再返回 404，目录下一次探测后市场会显示版本和 `DSH >=0.2.1-rc.2 <0.3.0-0` 宿主要求。
 
 | 你要安装的内容 | 安装来源 |
 | --- | --- |
 | 插件市场里的本插件 | 市场条目解析为 `github:Dclef/dsh-cursor-dev`，安装后会跟随仓库默认分支 |
-| npm 公共源上的已发布版本 | `dsh-cursor-dev`（`0.11.0` 起可用，按包内 `files` 白名单安装） |
+| npm 公共源上的已发布版本 | `dsh-cursor-dev`（`0.11.0` 起可用，按包内 `files` 白名单安装，当前为 `0.11.1`） |
 | 公开仓库的当前版本（推荐） | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
 | 你本地的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
-| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.11.0.tgz` |
+| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.11.1.tgz` |
 
 表中本地路径是示例，需要换成实际位置。npm 来源取 registry 上发布的最新版本；Git 来源会取得仓库默认分支的最新提交；`.tgz` 是某一刻的固定快照——要跟进后续改动就用 Git 来源。
 
@@ -88,7 +88,7 @@ dsh plugin add "/home/you/plugins/dsh-cursor-dev"
 安装收到的包：
 
 ```powershell
-dsh plugin add "D:/Downloads/dsh-cursor-dev-0.11.0.tgz"
+dsh plugin add "D:/Downloads/dsh-cursor-dev-0.11.1.tgz"
 ```
 
 终端没有 `dsh` 命令时，使用桌面插件管理即可。不要把在任意项目目录执行 `npm install` 当成已经在 DSH 当前 profile 中启用插件。
@@ -189,7 +189,7 @@ continueSession 设为 true。让 Cursor 说明上一轮做了什么，再核对
 
 | 现象 | 检查与处理 |
 | --- | --- |
-| 按包名安装返回 404 | `0.11.0` 起已发布到 npm 公共源；仍 404 时确认 registry 指向公共源且包名拼写为 `dsh-cursor-dev`，或改用插件市场、上面的 Git 来源、已取得的源码目录或安装包 |
+| 按包名安装返回 404 | `0.11.0` 起已发布到 npm 公共源（当前 `0.11.1`）；仍 404 时确认 registry 指向公共源且包名拼写为 `dsh-cursor-dev`，或改用插件市场、上面的 Git 来源、已取得的源码目录或安装包 |
 | DSH 报告找不到 Cursor CLI | 检查 `agent status --format json`；确认 CLI 位于 DSH 可见的 PATH 或常见安装目录，然后重启 DSH。仍找不到时，在插件配置里设置 `command` 为可启动二进制、安装根目录、`agent.cmd`，或 `"node.exe" "index.js"`（非空时只走该路径） |
 | 未登录或账号不可用 | 在运行 DSH 的同一操作系统用户下执行 `agent login`，检查账号和网络状态 |
 | 面板选了 Auto，实际仍是其他模型 | 当前任务不会中途切换；新版请保存“锁定面板模型”。查看返回的 `modelSource` 与 `requestedModel`，确认是否有显式调用参数 |
