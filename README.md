@@ -25,7 +25,7 @@ flowchart LR
 
 - **父模型**理解需求、拆解任务、调用工具、审查结果。它的模型供应商和 API 配置由 DSH 管理。
 - **Cursor CLI**使用自己的登录账号和可用模型执行任务，包括读取文件、修改代码、运行命令。
-- **插件**启动或恢复 Cursor 会话，传入任务，记录执行过程，并把报告返回原来的父代理。Cursor 的执行过程还会镜像到可点击的 DSH 子会话。
+- **插件**启动或恢复 Cursor 会话，传入任务，记录执行过程，并把报告返回原来的父代理。`cursor_code` 的执行过程还会镜像到可点击的 DSH 子会话。
 
 父模型不必是 Cursor 提供的模型。前提是它已接入 DSH、支持工具调用，并且当前会话允许使用插件的工具。这里的模型兼容性指 **DSH 内的父模型**；其他聊天应用需要另行接入，这个包没有提供通用 MCP 服务。
 
@@ -49,9 +49,9 @@ flowchart LR
 3. 按 DSH 提示完成加载；涉及后台代码更新时重启 DSH，然后刷新页面。在 Cursor 面板中选择模型并保存。
 4. 明确告诉父模型使用 `cursor_code`，或者用下面的斜杠命令派发第一个任务。
 
-**版本说明（2026-10-16 核对）：** `0.10.0` 已推送到公开仓库的 `main`，其中包含本文描述的原生子智能体接入、面板模型锁定、父级专属的 `maxChildDepth` 递归限制、子进程代理探测与面板模型浏览器，以及[安装指南](docs/INSTALL.md)。npm 公共源尚未发布 `dsh-cursor-dev`，所以按包名安装会返回 404；插件市场（dshmarket）的收录仍在审核，合并前市场里搜不到本插件。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
+**版本说明（2026-10-17 核对）：** `0.11.0` 已推送到公开仓库的 `main`，适配 DSH `0.2.1-rc.2`：插件改用新的外部子智能体契约（`startActivation`、必须返回未被占用的子会话 id、External 行由宿主写入），在包顶层声明 `engines.dsh: ^0.2.0-rc.1`，并清理了 DSH 0.2.1 已删除的工具配置项。插件市场（dshmarket）已收录本插件（目录条目合并于 2026-10-17），可以直接在市场里找到并安装；npm 公共源仍未发布，所以按包名安装会返回 404。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
 
-运行要求：DSH 包声明最低版本 `>=0.2.0-rc.1`；Node.js `^22.19.0 || >=24.0.0`；已登录且可访问服务的 Cursor CLI。原生子智能体功能需要 DSH 的 `subagents`、`agents` 服务，后台任务还需要对应任务服务，建议使用当前 DSH 桌面版。CLI 安装方法见 [Cursor 官方文档](https://cursor.com/docs/cli)。
+运行要求：DSH 包声明 `^0.2.0-rc.1`（已在 `0.2.1-rc.2` 上验证）；Node.js `^22.19.0 || >=24.0.0`；已登录且可访问服务的 Cursor CLI。原生子智能体功能需要 DSH 的 `subagents`、`agents` 服务，后台任务还需要对应任务服务，建议使用当前 DSH 桌面版。CLI 安装方法见 [Cursor 官方文档](https://cursor.com/docs/cli)。
 
 ### 三个入口
 
@@ -59,7 +59,7 @@ flowchart LR
 | --- | --- | --- |
 | `cursor_code` | 父模型派发完整任务，控制目录、模式、模型、会话与报告 | 工具结果回到调用它的父模型，包含答复、步骤和检测到的文件变更 |
 | `/cursor-subagent 任务内容` | 用户直接派发一次任务；可选前缀 `-m 模型` | 完成或失败后，插件把摘要交给原父代理继续处理 |
-| `cursor_subagent` | 当前源码新增的 DSH 原生一次性子智能体工具，可后台运行 | 使用 DSH 标准结果及后台任务机制；完整过程可在镜像子会话中查看 |
+| `cursor_subagent` | 当前源码新增的 DSH 原生一次性子智能体工具，可后台运行 | 使用 DSH 标准结果及后台任务机制；DSH 0.2.1 起这次运行在父会话里显示为一行 External 任务，可点击的镜像子会话只由 `cursor_code` 创建 |
 
 例如，在一个空测试工作区发送：
 
@@ -188,7 +188,7 @@ npm install
 node --test --test-force-exit --test-skip-pattern="the child agent really edits a file|a bad model is rejected|the real Cursor account returns live quota data" "test/**/*.test.mjs"
 ```
 
-完整测试命令为 `npm test`，其中三个真实 CLI/账号测试需要 Cursor 登录和网络，执行任务会使用该账号额度。当前实现已通过 185 项离线测试，并完成两轮真实 Auto 调用、文件修改和上下文续接验证。打包使用 `npm pack` 或 `pnpm pack`，发布前按[分发检查](docs/INSTALL.md#7-维护者分发前检查)核对安装包和版本。
+完整测试命令为 `npm test`，共 213 项；上面那条命令跳过其中三个真实 CLI/账号测试，剩下 210 项离线测试必须全绿。真实测试需要 Cursor 登录和网络，执行任务会使用该账号额度。当前实现已通过 210 项离线测试，并完成两轮真实 Auto 调用、文件修改和上下文续接验证。打包使用 `npm pack` 或 `pnpm pack`，发布前按[分发检查](docs/INSTALL.md#7-维护者分发前检查)核对安装包和版本。
 
 ## English
 
@@ -208,9 +208,9 @@ See the [installation guide](docs/INSTALL.md) for detailed setup and troubleshoo
 3. Restart DSH when backend changes require it, then refresh the page. Open the Cursor panel under `/plugins/dsh-cursor-dev/`, select a model and save it.
 4. Ask the parent to use `cursor_code`, or send `/cursor-subagent` followed by a complete task. The command dispatches directly and hands a completion or failure summary back to the original parent.
 
-As checked on **2026-10-16**, version `0.10.0` is pushed to `main` on the public repository and carries the native-provider and model-lock work documented here plus the parent-only `maxChildDepth` recursion cap, child proxy detection and the model browser, together with [the install guide](docs/INSTALL.md). The package is not published to the public npm registry, so a bare package-name installation returns 404, and the dsh-market listing is still under review. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
+As checked on **2026-10-17**, version `0.11.0` is pushed to `main` on the public repository and adapts the plugin to DSH `0.2.1-rc.2`: it follows the new external-subagent contract (`startActivation`, a child id the host has not registered yet, and the `External` catalog row written by the host), declares `engines.dsh: ^0.2.0-rc.1` at the package top level, and drops the tool-config keys that DSH 0.2.1 removed. The dsh-market catalog already lists this plugin (entry merged 2026-10-17), so it can be installed from the market; the package is still not published to the public npm registry, so a bare package-name installation returns 404. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
 
-Requirements: DSH metadata declares `>=0.2.0-rc.1`; Node.js `^22.19.0 || >=24.0.0`; an authenticated Cursor CLI account with service access. Native dispatch additionally needs DSH's `subagents` and `agents` services, and background runs need the host's job services. A current DSH desktop installation is recommended.
+Requirements: DSH metadata declares `^0.2.0-rc.1` (verified against `0.2.1-rc.2`); Node.js `^22.19.0 || >=24.0.0`; an authenticated Cursor CLI account with service access. Native dispatch additionally needs DSH's `subagents` and `agents` services, and background runs need the host's job services. A current DSH desktop installation is recommended.
 
 ### Parent-to-child contract
 
@@ -227,7 +227,7 @@ The default model order is call argument → saved panel choice → plugin confi
 
 The current source registers a native DSH provider named `cursor` and a standard one-shot tool named `cursor_subagent`. Rich `cursor_code` calls also use the native lifecycle when those host services exist. The existing generic `subagent` backend remains configured as before.
 
-Cursor executes externally; a real DSH child session mirrors the transcript for inspection. Standard background runs use DSH's job result and cancellation tools. Persistent mailbox continuation through `send_message`, and Cursor as a resident Agent Teams teammate, are not implemented. Use `cursor_code` with `continueSession` for explicit follow-ups.
+Cursor executes externally. From DSH 0.2.1 on, the host writes a single non-interactive `External` row for a `cursor_subagent` run; the clickable mirrored child conversation is created by `cursor_code`, which starts the provider directly. Standard background runs use DSH's job result and cancellation tools. Persistent mailbox continuation through `send_message`, and Cursor as a resident Agent Teams teammate, are not implemented. Use `cursor_code` with `continueSession` for explicit follow-ups.
 
 The parent remains responsible for reviewing the actual changes and verification evidence. File reports have scan limits and are not a substitute for final workspace checks. Cursor model availability and usage depend on the Cursor account; the parent model uses its separate DSH provider configuration.
 

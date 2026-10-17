@@ -10,5 +10,3 @@
         provider: cursor
         toolName: cursor_subagent
         maxDepth: provider-managed
-        backgroundMode: one-shot
-        enableRunInBackground: true
