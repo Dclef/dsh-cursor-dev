@@ -372,6 +372,7 @@ test('apply() mounts the tool and the HTTP routes against the host contract', as
         // The reporting surfaces, by exact path.
         assert.deepEqual(routes.map(route => route.path).sort(), [
             '/plugins/dsh-cursor-dev/',
+            '/plugins/dsh-cursor-dev/api/forget',
             '/plugins/dsh-cursor-dev/api/journal',
             '/plugins/dsh-cursor-dev/api/restore',
             '/plugins/dsh-cursor-dev/api/settings',
@@ -439,6 +440,7 @@ test('the HTTP routes wait for webServer, and are never registered without it', 
 
         assert.deepEqual(routes.map(route => route.path).sort(), [
             '/plugins/dsh-cursor-dev/',
+            '/plugins/dsh-cursor-dev/api/forget',
             '/plugins/dsh-cursor-dev/api/journal',
             '/plugins/dsh-cursor-dev/api/restore',
             '/plugins/dsh-cursor-dev/api/settings',
@@ -584,7 +586,7 @@ test('usage routes register against the host contract and answer HTTP', async ()
             dataDir: dir,
             mirrors,
         });
-        assert.equal(routes.size, 4, `expected 4 routes, got ${[...routes.keys()].join(', ')}`);
+        assert.equal(routes.size, 5, `expected 5 routes, got ${[...routes.keys()].join(', ')}`);
 
         const call = async (path, url, extra) => {
             const route = routes.get(path);
@@ -683,6 +685,32 @@ test('usage routes register against the host contract and answer HTTP', async ()
         assert.equal(noKey.status, 400);
         const unknown = await call('/plugins/dsh-cursor-dev/api/restore', '/plugins/dsh-cursor-dev/api/restore?key=nope', { method: 'POST' });
         assert.equal(unknown.status, 404);
+
+        // Deleting a history row is the other route that does work: the row is
+        // only really gone once the index, the journal and the pool's memory of
+        // it are all gone, and a row surviving one of those would come back.
+        await index.set('gone::default', { cursorSessionId: 'sid-9', workspaceRoot: 'C:\\w', model: 'auto', turns: 1 });
+        journal.annotate('gone::default#2', { task: 'old work' });
+        assert.equal(journal.readConversation('gone::default').bucket.task, 'old work');
+        const wrongForget = await call('/plugins/dsh-cursor-dev/api/forget', '/plugins/dsh-cursor-dev/api/forget?key=gone::default');
+        assert.equal(wrongForget.status, 405, 'forgetting is a POST');
+        const noForgetKey = await call('/plugins/dsh-cursor-dev/api/forget', '/plugins/dsh-cursor-dev/api/forget', { method: 'POST' });
+        assert.equal(noForgetKey.status, 400, 'and it must be told which row');
+        const forgotten = await call('/plugins/dsh-cursor-dev/api/forget',
+            '/plugins/dsh-cursor-dev/api/forget?key=' + encodeURIComponent('gone::default#2'), { method: 'POST' });
+        assert.equal(forgotten.status, 200);
+        const forgottenBody = JSON.parse(forgotten.body);
+        assert.equal(forgottenBody.ok, true);
+        assert.equal(forgottenBody.conversationKey, 'gone::default', 'a generation-scoped key names the same row');
+        assert.equal(forgottenBody.existed, true);
+        assert.equal(index.get('gone::default'), undefined, 'the durable row is gone');
+        assert.equal(journal.readConversation('gone::default'), undefined, 'and so is the timeline behind it');
+        // A second click on an already-deleted row must not look like a failure:
+        // the button's promise is "make it invisible", which it now is.
+        const again = await call('/plugins/dsh-cursor-dev/api/forget',
+            '/plugins/dsh-cursor-dev/api/forget?key=gone::default', { method: 'POST' });
+        assert.equal(again.status, 200);
+        assert.equal(JSON.parse(again.body).existed, false);
 
         dispose();
         assert.equal(routes.size, 0, 'dispose must remove every route');
@@ -1034,9 +1062,10 @@ test('a missing Cursor CLI degrades the tool instead of failing the mount', asyn
     // Everything that does not need the CLI still mounts.
     assert.equal(mounted.length, 1);
     assert.equal(mounted[0].name, 'cursor_code');
-    assert.equal(routes.size, 6, [...routes.keys()].join(', '));
+    assert.equal(routes.size, 7, [...routes.keys()].join(', '));
     assert.equal(routes.has('/plugins/dsh-cursor-dev/api/settings'), true, 'the model picker mounts without a CLI too');
     assert.equal(routes.has('/plugins/dsh-cursor-dev/api/restore'), true, 'the restore route mounts too, and refuses politely without a CLI');
+    assert.equal(routes.has('/plugins/dsh-cursor-dev/api/forget'), true, 'so does the history delete button');
 
     const failed = await mounted[0].execute({ task: 'do something' },
         { agent: { id: 'p' }, signal: new AbortController().signal });

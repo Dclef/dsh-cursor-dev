@@ -152,7 +152,7 @@ flowchart LR
 
 从 DSH 的 Cursor 插件入口打开面板，也可以访问当前 DSH 地址下的 `/plugins/dsh-cursor-dev/`。例如，DSH 运行在 `http://127.0.0.1:19387` 时，面板地址为 `http://127.0.0.1:19387/plugins/dsh-cursor-dev/`；其他用户应使用自己的地址和端口。
 
-面板包含安装/登录状态、账号额度、模型和模式设置、活动与历史会话。点击会话可查看镜像记录。新版本页面可能与上面的截图不同。
+面板包含安装/登录状态、账号额度、模型和模式设置、活动与历史会话。点击会话可查看镜像记录。历史会话会一直累积，所以列表默认收在一个限高的滚动框里，点标题即可整段折叠（选择会被记住）；每行右侧的 **删除** 会清掉这次运行的全部痕迹——索引记录、轨迹和镜像子会话，和 `resetSession` 走同一条链路。删除要连点两次（第一次只是变成「确认删除」），因为删掉之后无法恢复。新版本页面可能与上面的截图不同。
 
 | 插件配置 | 默认值 | 用途 |
 | --- | --- | --- |
@@ -194,7 +194,7 @@ npm install
 node --test --test-force-exit --test-skip-pattern="the child agent really edits a file|a bad model is rejected|the real Cursor account returns live quota data" "test/**/*.test.mjs"
 ```
 
-完整测试命令为 `npm test`，共 213 项；上面那条命令跳过其中三个真实 CLI/账号测试，剩下 210 项离线测试必须全绿。真实测试需要 Cursor 登录和网络，执行任务会使用该账号额度。当前实现已通过 210 项离线测试，并完成两轮真实 Auto 调用、文件修改和上下文续接验证。打包使用 `npm pack` 或 `pnpm pack`，发布前按[分发检查](docs/INSTALL.md#7-维护者分发前检查)核对安装包和版本。
+完整测试命令为 `npm test`，共 216 项；上面那条命令跳过其中三个真实 CLI/账号测试，剩下 213 项离线测试必须全绿。真实测试需要 Cursor 登录和网络，执行任务会使用该账号额度。当前实现已通过 213 项离线测试，并完成两轮真实 Auto 调用、文件修改和上下文续接验证。打包使用 `npm pack` 或 `pnpm pack`，发布前按[分发检查](docs/INSTALL.md#7-维护者分发前检查)核对安装包和版本。
 
 ## English
 
@@ -217,7 +217,7 @@ See the [installation guide](docs/INSTALL.md) for detailed setup and troubleshoo
    dsh plugin add dsh-cursor-dev
    ```
 
-3. Restart DSH when backend changes require it, then refresh the page. Open the Cursor panel under `/plugins/dsh-cursor-dev/`, select a model and save it.
+3. Restart DSH when backend changes require it, then refresh the page. Open the Cursor panel under `/plugins/dsh-cursor-dev/`, select a model and save it. The history list keeps one row per run forever, so it sits in a height-capped scroll box and folds away when you click its heading (the choice is remembered); a row's **Delete** link clears that run's index record, journal and mirrored child — the same chain `resetSession` uses — and arms on the first click so the irreversible second click is deliberate.
 4. Ask the parent to use `cursor_code`, or send `/cursor-subagent` followed by a complete task. The command dispatches directly and hands a completion or failure summary back to the original parent.
 
 As checked on **2026-10-17**, version `0.11.1` is pushed to `main` on the public repository and adapts the plugin to DSH `0.2.1-rc.2`: it follows the new external-subagent contract (`startActivation`, a child id the host has not registered yet, and the `External` catalog row written by the host), declares `engines.dsh: >=0.2.1-rc.2 <0.3.0-0` at the package top level (only the contract it actually implements and tests; the `-0` suffix also excludes `0.3.0` prereleases), and drops the tool-config keys that DSH 0.2.1 removed. The dsh-market catalog already lists this plugin (entry merged 2026-10-17), so it can be installed from the market; version `0.11.1` is published to the public npm registry as `dsh-cursor-dev`, so a bare package-name installation works and the market card shows the version and the `DSH >=0.2.1-rc.2 <0.3.0-0` host requirement after the catalog's next probe. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.

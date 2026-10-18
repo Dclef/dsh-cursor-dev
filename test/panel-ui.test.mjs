@@ -45,7 +45,13 @@ async function panel(t) {
         },
     };
     document.getElementById('bootstrap').textContent = bootstrap;
-    const context = { document, window: { localStorage: { getItem: () => 'zh' } }, fetch: async () => ({ json: async () => ({}) }) };
+    const calls = [];
+    const context = {
+        document,
+        window: { localStorage: { getItem: () => 'zh' } },
+        fetch: async (url, init) => { calls.push({ url, method: init?.method }); return { json: async () => ({}) }; },
+        calls,
+    };
     const executable = source.replace('\n  applyLanguage();\n', `
   globalThis.panelTest = {
     renderModel: renderModel, shortKey: shortKey,
@@ -57,7 +63,20 @@ async function panel(t) {
       settings = value; models = list || []; draftDisabled = null; draftModel = null; modelTab = 'all'; renderModel();
     },
     disable: function (id) { setDisabled(id, true); renderModel(); },
-    tab: function (key) { modelTab = key; renderModel(); }
+    tab: function (key) { modelTab = key; renderModel(); },
+    history: function (list) {
+      lastPayload = { ok: true, extended: { live: [], conversations: list } };
+      renderLive(lastPayload);
+    },
+    cells: function () { return $('convos').children; },
+    count: function () { return $('convos-count').textContent; },
+    actions: function () {
+      var tr = $('convos').children[0];
+      return tr ? tr.children[5].children : [];
+    },
+    forget: function (key) { forgetRow({ key: key }); },
+    armed: function () { return armedFor; },
+    calls: function () { return calls; }
   };
   return;
   applyLanguage();
@@ -82,6 +101,45 @@ test('a long session key cannot widen the page: every table sits in a scroll con
     assert.equal(tables.length, 2, 'and no bare table is left outside one');
     assert.match(html, /\.tablewrap \{ overflow-x: auto;/, 'the wrapper, not <body>, owns the horizontal scroll');
     assert.match(html, /minmax\(min\(220px, 100%\), 1fr\)/, 'a narrow panel wraps the quota cards instead of clipping them');
+});
+
+test('the history list is bounded and can be folded away, so it cannot grow the page', async t => {
+    const { html } = await panel(t);
+    // One row per run the operator has ever made lives here; without a bound it
+    // is the tallest thing on the page and pushes everything else off it.
+    assert.match(html, /#convos-body \{ max-height: \d+px; overflow-y: auto; \}/,
+        'the history table scrolls inside a capped box');
+    assert.match(html, /id="convos-body"/, 'that box wraps the history table');
+    assert.match(html, /id="convos-toggle"/, 'and the heading is the control that folds it');
+    assert.match(html, /dsh-cursor-dev:convos-folded/, 'the fold choice is remembered per browser');
+});
+
+test('every history row carries a delete control', async t => {
+    const { html } = await panel(t);
+    assert.match(html, /data-t="colActions">操作</, 'the history table advertises the column');
+    assert.match(html, /id="convos-notice"/, 'deleting reports back next to the table it emptied');
+    assert.match(html, /"forgetEndpoint":"\/plugins\/dsh-cursor-dev\/api\/forget"/,
+        'the panel knows where to forget a conversation');
+    // The delete is destructive (index, journal and mirror all go), so it is
+    // armed by the first click instead of firing on it.
+    assert.match(html, /forgetArmed/);
+    assert.match(html, /armedFor/);
+});
+
+test('deleting a row arms on the first click and needs a second to fire', async t => {
+    const p = await panel(t);
+    const calls = p.calls();
+    p.history([{ key: 'a::default', cursorSessionId: 'sid-1', workspaceRoot: 'C:\\w', model: 'auto', updatedAt: 1 }]);
+    assert.equal(p.cells().length, 1, 'the row is on screen');
+    p.forget('a::default');
+    assert.deepEqual(calls, [], 'one click only arms the row');
+    assert.equal(p.armed(), 'a::default');
+    assert.match(p.actions()[0].textContent, /确认删除/, 'the armed row says what the next click does');
+    p.forget('a::default');
+    assert.equal(calls.length, 1, 'the second click is the delete');
+    assert.equal(calls[0].method, 'POST');
+    assert.match(calls[0].url, /api\/forget\?key=a%3A%3Adefault/);
+    assert.equal(p.armed(), '', 'the confirmation is spent');
 });
 
 test('the model search box filters the picker without touching the API', async t => {
