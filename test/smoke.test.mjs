@@ -1123,6 +1123,7 @@ test('the proxy a panel saves is the one the child process starts with', async (
     const plugin = await import('../lib/index.js');
     const dataDir = await mkdtemp(join(tmpdir(), 'dsh-proxy-data-'));
     const binDir = await mkdtemp(join(tmpdir(), 'dsh-proxy-bin-'));
+    const previousDataDir = process.env.DSH_CURSOR_DEV_DATA;
     const routes = new Map();
     const server = { register: route => { routes.set(route.path, route); return () => routes.delete(route.path); } };
     const ctx = {
@@ -1137,6 +1138,7 @@ test('the proxy a panel saves is the one the child process starts with', async (
         effect: () => {},
     };
     try {
+        process.env.DSH_CURSOR_DEV_DATA = dataDir;
         const seen = join(binDir, 'seen.txt');
         const stub = join(binDir, 'agent-stub.mjs');
         await writeFile(stub, `import { writeFileSync } from 'node:fs';\n`
@@ -1159,6 +1161,10 @@ test('the proxy a panel saves is the one the child process starts with', async (
         assert.match(JSON.parse(chunks.join('')).agent.command, /node\.exe$/i);
     }
     finally {
+        if (previousDataDir === undefined)
+            delete process.env.DSH_CURSOR_DEV_DATA;
+        else
+            process.env.DSH_CURSOR_DEV_DATA = previousDataDir;
         await safeRemove(dataDir);
         await safeRemove(binDir);
     }

@@ -116,17 +116,20 @@ test('normalizeSettings ignores values it cannot trust', () => {
     assert.equal(normalizeSettings(null).version, 1);
 });
 
-test('the proxy setting is text, bounded, and defaults to "ask the machine"', () => {
-    assert.equal(emptySettings().proxy, '', 'blank means "detect the system proxy", not "no proxy"');
+test('the proxy setting is text, bounded, and defaults to direct', () => {
+    assert.equal(emptySettings().proxy, 'none');
+    assert.equal(normalizeSettings({}).proxy, 'none');
+    assert.equal(normalizeSettings(null).proxy, 'none');
     assert.equal(normalizeSettings({ proxy: 'http://127.0.0.1:7890' }).proxy, 'http://127.0.0.1:7890');
     assert.equal(normalizeSettings({ proxy: '  none  ' }).proxy, 'none');
     assert.equal(normalizeSettings({ proxy: '' }).proxy, '');
-    assert.equal(normalizeSettings({ proxy: 7890 }).proxy, '', 'a number is not a proxy');
-    assert.equal(normalizeSettings({ proxy: ['http://a:1'] }).proxy, '');
+    assert.equal(normalizeSettings({ proxy: '  ' }).proxy, '');
+    assert.equal(normalizeSettings({ proxy: 7890 }).proxy, 'none', 'a number is not a proxy');
+    assert.equal(normalizeSettings({ proxy: ['http://a:1'] }).proxy, 'none');
     // A settings file is JSON somebody can hand-edit, so a value that is too
     // long to be a proxy is dropped rather than truncated: half a URL is worse
     // than none.
-    assert.equal(normalizeSettings({ proxy: 'x'.repeat(5000) }).proxy, '');
+    assert.equal(normalizeSettings({ proxy: 'x'.repeat(5000) }).proxy, 'none');
     assert.equal(normalizeSettings({ proxy: 'x'.repeat(200) }).proxy, 'x'.repeat(200));
 });
 
@@ -390,7 +393,7 @@ test('the settings API reports the state the panel needs to render', async () =>
             modelPolicy: 'per-call',
             mode: '',
             language: 'en',
-            proxy: '',
+            proxy: 'none',
             disabledModels: [],
             updatedAt: json.settings.updatedAt,
         });

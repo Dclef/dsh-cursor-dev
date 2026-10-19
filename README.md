@@ -55,7 +55,7 @@ flowchart LR
 3. 按 DSH 提示完成加载；涉及后台代码更新时重启 DSH，然后刷新页面。在 Cursor 面板中选择模型并保存。
 4. 明确告诉父模型使用 `cursor_code`，或者用下面的斜杠命令派发第一个任务。
 
-**版本说明（2026-10-18 核对）：** `0.12.0` 已推送到公开仓库的 `main` 并发布到 npm 公共源（包名 `dsh-cursor-dev`），沿用 `0.11.1` 的 DSH `0.2.1-rc.2` 契约（外部子智能体契约、顶层 `engines.dsh: >=0.2.1-rc.2 <0.3.0-0`），并重做了面板的历史会话卡：列表收进限高滚动框、点标题即可整段折叠（选择记在浏览器本地），每行新增两段式**删除**，经新增的 `api/forget` 路由一并清掉索引记录、轨迹和镜像子会话。插件市场（dshmarket）已收录本插件（目录条目合并于 2026-10-17），可以直接在市场里找到并安装，目录下一次探测后卡片会显示 `0.12.0`。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
+**版本说明（0.12.1）：** 本版新增 macOS Keychain 登录凭据读取，修正 CLI 子进程的代理默认值和直连时的环境变量继承：未配置时为 `none`（直连），主动留空时使用系统代理，填写 URL 时使用显式代理。已有空值配置保持系统代理语义，面板仍使用原来的输入框，没有 UI 改版。macOS Keychain 路径尚未实机验证。DSH 兼容性仍为 `>=0.2.1-rc.2 <0.3.0-0`。插件市场已收录本插件，卡片版本随目录探测更新；npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
 
 运行要求：DSH `>=0.2.1-rc.2 <0.3.0-0`（已在 `0.2.1-rc.2` 上验证）；Node.js `^22.19.0 || >=24.0.0`；已登录且可访问服务的 Cursor CLI。原生子智能体功能需要 DSH 的 `subagents`、`agents` 服务，后台任务还需要对应任务服务，建议使用当前 DSH 桌面版。CLI 安装方法见 [Cursor 官方文档](https://cursor.com/docs/cli)。
 
@@ -169,17 +169,17 @@ flowchart LR
 
 ### 代理设置
 
-面板的「子智能体模型」卡片里有**代理**输入框，未设置时默认为空。
+面板的「子智能体模型」卡片里有**代理**输入框，未设置时默认为 `none`（直连）。
 
 | 取值 | 含义 |
 | --- | --- |
-| 留空（默认） | 自动探测：先看 `HTTPS_PROXY` 等环境变量，再看 Windows「Internet 选项」里的代理 |
-| `none` | 直连，不用代理 |
+| `none`（默认） | 直连，并从 CLI 子进程环境中移除继承的代理地址变量 |
+| 留空 | 自动探测：先看 `HTTPS_PROXY` 等环境变量，再看 Windows「Internet 选项」里的代理 |
 | `http://127.0.0.1:7890` | 显式指定代理，优先于环境变量和注册表 |
 
 **为什么需要它：** Cursor CLI 只读 `HTTPS_PROXY` / `HTTP_PROXY` / `https_proxy` / `http_proxy`——不读注册表，也不读 `ALL_PROXY`。所以一台只把代理写在「Internet 选项」里的机器，插件启动的 CLI 子进程会直连 Cursor，而直连只会拿到模型目录里的**一小部分**：本机实测 `agent --list-models` 为 **31 个**（走代理 **265 个**），ACP 会话清单为 **10 个**（走代理 **46 个**）。这就是「有些模型看不到」的全部原因。
 
-留空即自动探测，所以正常情况下不需要配置任何东西；插件会把探测到的地址写进子进程环境（`HTTPS_PROXY`、`HTTP_PROXY` 及小写形式），并在模型卡片的「可选模型」那一行末尾显示**子进程出口**。面板保存后立刻生效，不必重启应用；如果填的值解析不了，那一行会直接说明。
+需要系统代理时，主动清空输入框并保存；插件会把探测到的地址写进子进程环境（`HTTPS_PROXY`、`HTTP_PROXY` 及小写形式），并在模型卡片的「可选模型」那一行末尾显示**子进程出口**。升级时已保存的空值仍表示自动探测，不会被改成 `none`。面板保存后对后续启动的子进程生效，不必重启应用；如果填的值解析不了，那一行会直接说明。
 
 模型卡片下方还有可搜索的模型浏览器：点一行设为面板模型，右边的开关决定它是否出现在上方下拉框里。关掉的模型只是藏起来（写入 `disabledModels`），点「保存」后生效，随时可以再打开——这样在完整目录有上百个模型时也能只留下写业务常用的几条。
 
@@ -194,7 +194,7 @@ npm install
 node --test --test-force-exit --test-skip-pattern="the child agent really edits a file|a bad model is rejected|the real Cursor account returns live quota data" "test/**/*.test.mjs"
 ```
 
-完整测试命令为 `npm test`，共 216 项；上面那条命令跳过其中三个真实 CLI/账号测试，剩下 213 项离线测试必须全绿。真实测试需要 Cursor 登录和网络，执行任务会使用该账号额度。当前实现已通过 213 项离线测试，并完成两轮真实 Auto 调用、文件修改和上下文续接验证。打包使用 `npm pack` 或 `pnpm pack`，发布前按[分发检查](docs/INSTALL.md#7-维护者分发前检查)核对安装包和版本。
+完整测试命令为 `npm test`。上面的命令跳过三个真实 CLI/账号测试，不派发真实编码任务；其余 smoke 测试仍包含只读额度 HTTP 检查，因此并非完全离线。真实编码测试需要 Cursor 登录和网络，执行任务会使用该账号额度。Windows 下的 Keychain 测试因需要 POSIX shell 而跳过，不能据此认定 macOS 已验证；企业证书环境可使用 Node.js 的 `--use-system-ca`。打包使用 `npm pack` 或 `pnpm pack`，发布前按[分发检查](docs/INSTALL.md#7-维护者分发前检查)核对安装包和版本。
 
 ## English
 
@@ -220,7 +220,7 @@ See the [installation guide](docs/INSTALL.md) for detailed setup and troubleshoo
 3. Restart DSH when backend changes require it, then refresh the page. Open the Cursor panel under `/plugins/dsh-cursor-dev/`, select a model and save it. The history list keeps one row per run forever, so it sits in a height-capped scroll box and folds away when you click its heading (the choice is remembered); a row's **Delete** link clears that run's index record, journal and mirrored child — the same chain `resetSession` uses — and arms on the first click so the irreversible second click is deliberate.
 4. Ask the parent to use `cursor_code`, or send `/cursor-subagent` followed by a complete task. The command dispatches directly and hands a completion or failure summary back to the original parent.
 
-As checked on **2026-10-18**, version `0.12.0` is pushed to `main` on the public repository and published to the public npm registry as `dsh-cursor-dev`. It keeps the DSH `0.2.1-rc.2` contract from `0.11.1` (the external-subagent contract and `engines.dsh: >=0.2.1-rc.2 <0.3.0-0` at the package top level), and reworks the panel's history card: the list sits in a height-capped scroll box, folds away from its heading (remembered per browser), and each row gains a two-click **Delete** that clears the index record, journal and mirrored child through a new `api/forget` route. The dsh-market catalog already lists this plugin (entry merged 2026-10-17), so it can be installed from the market, and the card shows `0.12.0` after the catalog's next probe. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
+Version `0.12.1` adds macOS Keychain credential lookup and fixes the child CLI's proxy defaults and inherited environment: a missing setting means `none` (direct), an explicitly empty value follows the system proxy, and a URL selects an explicit proxy. Existing empty settings keep their meaning. The panel still uses the same text input; this is not a UI redesign. The macOS Keychain path has not been verified on a real Mac. DSH compatibility remains `>=0.2.1-rc.2 <0.3.0-0`. The dsh-market catalog already lists this plugin and updates its displayed version on subsequent probes. The public npm package is `dsh-cursor-dev`; its `latest` tag identifies the published version. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
 
 Requirements: DSH `>=0.2.1-rc.2 <0.3.0-0` (verified against `0.2.1-rc.2`); Node.js `^22.19.0 || >=24.0.0`; an authenticated Cursor CLI account with service access. Native dispatch additionally needs DSH's `subagents` and `agents` services, and background runs need the host's job services. A current DSH desktop installation is recommended.
 

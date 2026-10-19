@@ -38,15 +38,15 @@ agent status --format json
 
 ## 2. 选择安装来源
 
-**发布状态（2026-10-18 核对）：** 公共 GitHub 仓库存在，`0.12.0` 已推送到 `main` 并发布到 npm 公共源（包名 `dsh-cursor-dev`），沿用 `0.11.1` 的 DSH `0.2.1-rc.2` 外部子智能体契约与顶层 `engines.dsh: >=0.2.1-rc.2 <0.3.0-0`，并重做历史会话卡（限高滚动、可折叠、每行可删除）。插件市场（dshmarket）的目录条目已于 2026-10-17 合并，可以直接在市场里找到本插件，目录下一次探测后卡片会显示 `0.12.0`。
+**当前源码版本：** `0.12.1`，新增 macOS Keychain 登录凭据读取，并修正 CLI 子进程的默认直连与代理环境变量继承；面板没有 UI 改版。macOS Keychain 路径尚未实机验证。DSH 兼容性保持 `>=0.2.1-rc.2 <0.3.0-0`。npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。插件市场已收录本插件，卡片版本随目录探测更新。
 
 | 你要安装的内容 | 安装来源 |
 | --- | --- |
 | 插件市场里的本插件 | 市场条目解析为 `github:Dclef/dsh-cursor-dev`，安装后会跟随仓库默认分支 |
-| npm 公共源上的已发布版本 | `dsh-cursor-dev`（`0.11.0` 起可用，按包内 `files` 白名单安装，当前为 `0.12.0`） |
+| npm 公共源上的已发布版本 | `dsh-cursor-dev`（`0.11.0` 起可用，按包内 `files` 白名单安装，版本以 npm 的 `latest` 标签为准） |
 | 公开仓库的当前版本（推荐） | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
 | 你本地的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
-| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.0.tgz` |
+| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.1.tgz` |
 
 表中本地路径是示例，需要换成实际位置。npm 来源取 registry 上发布的最新版本；Git 来源会取得仓库默认分支的最新提交；`.tgz` 是某一刻的固定快照——要跟进后续改动就用 Git 来源。
 
@@ -88,7 +88,7 @@ dsh plugin add "/home/you/plugins/dsh-cursor-dev"
 安装收到的包：
 
 ```powershell
-dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.0.tgz"
+dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.1.tgz"
 ```
 
 终端没有 `dsh` 命令时，使用桌面插件管理即可。不要把在任意项目目录执行 `npm install` 当成已经在 DSH 当前 profile 中启用插件。
@@ -121,7 +121,7 @@ http://127.0.0.1:19387/plugins/dsh-cursor-dev/
 
 ### 模型列表不全时先看代理
 
-同一张卡片上有 **代理** 输入框，留空即为自动探测，正常情况不需要填。它决定的是**插件启动的 CLI 子进程**走哪条网络出口。
+同一张卡片上有 **代理** 输入框，默认值为 `none`（直连）；主动留空表示自动探测系统代理，填写 URL 表示显式代理。它决定的是**插件启动的 CLI 子进程**走哪条网络出口。升级时已保存的空值仍表示系统代理，不会被覆盖。
 
 Cursor CLI 只读 `HTTPS_PROXY` / `HTTP_PROXY`（以及小写形式），不读注册表，也不读 `ALL_PROXY`。代理只写在 Windows「Internet 选项」里的机器，子进程会直连 Cursor，而直连只返回模型目录的一部分——本机实测 `agent --list-models` 为 31 个（走代理 265 个），面板真正使用的 ACP 清单为 10 个（走代理 46 个）。
 
@@ -129,8 +129,8 @@ Cursor CLI 只读 `HTTPS_PROXY` / `HTTP_PROXY`（以及小写形式），不读�
 
 1. 打开 `http://<你的 DSH 地址>/plugins/dsh-cursor-dev/`。
 2. 看「子智能体模型」卡片：**可选模型** 那一行末尾会显示 **子进程出口**，例如 `http://127.0.0.1:7890 (registry:Internet Settings)`。
-3. 如果显示 `direct (no proxy configured)`，而你的机器确实有代理，就在 **代理** 框里填上地址（如 `http://127.0.0.1:7890`）并点保存。保存后立即生效，不需要重启应用；面板会自动重新读取模型列表。
-4. 想强制直连时填 `none`。
+3. 如果显示 `direct (no proxy configured)`，而你想使用系统代理，清空 **代理** 框并保存；也可以填上地址（如 `http://127.0.0.1:7890`）使用显式代理。保存后对后续启动的子进程生效，不需要重启应用；面板会自动重新读取模型列表。
+4. 想强制直连时填 `none`，插件会从 CLI 子进程环境中移除继承的代理地址变量。
 
 也可以在终端里直接对照，两个数字应当与面板一致：
 
@@ -195,7 +195,7 @@ continueSession 设为 true。让 Cursor 说明上一轮做了什么，再核对
 
 | 现象 | 检查与处理 |
 | --- | --- |
-| 按包名安装返回 404 | `0.11.0` 起已发布到 npm 公共源（当前 `0.12.0`）；仍 404 时确认 registry 指向公共源且包名拼写为 `dsh-cursor-dev`，或改用插件市场、上面的 Git 来源、已取得的源码目录或安装包 |
+| 按包名安装返回 404 | 确认 registry 指向 npm 公共源且包名拼写为 `dsh-cursor-dev`，或改用插件市场、上面的 Git 来源、已取得的源码目录或安装包 |
 | DSH 报告找不到 Cursor CLI | 检查 `agent status --format json`；确认 CLI 位于 DSH 可见的 PATH 或常见安装目录，然后重启 DSH。仍找不到时，在插件配置里设置 `command` 为可启动二进制、安装根目录、`agent.cmd`，或 `"node.exe" "index.js"`（非空时只走该路径） |
 | 未登录或账号不可用 | 在运行 DSH 的同一操作系统用户下执行 `agent login`，检查账号和网络状态 |
 | 面板选了 Auto，实际仍是其他模型 | 当前任务不会中途切换；新版请保存“锁定面板模型”。查看返回的 `modelSource` 与 `requestedModel`，确认是否有显式调用参数 |
@@ -216,7 +216,7 @@ CLI 模型切换与任务执行使用同一个全局锁。进程可以缓存和�
 修改文档或本地源码不会自动发布给其他用户。分发新的功能前：
 
 1. 核对 [package.json](../package.json) 的版本与兼容性声明，为正式发布更新版本。
-2. 运行适当的测试；离线命令见 [README](../README.md#开发与验证)。完整 `npm test` 会包含需要真实账号的 CLI 测试。
+2. 运行适当的测试；跳过真实编码任务的命令见 [README](../README.md#开发与验证)，其中仍有只读网络检查。完整 `npm test` 会包含需要真实账号的 CLI 测试。
 3. 在源码目录运行 `npm pack` 或 `pnpm pack`，检查包中包括 `lib/`、`cordis.patch.yml`、README、本文及截图。
 4. 使用独立的 DSH profile 验证安装包：安装、登录检测、父模型派发、结果返回、续聊和取消。
 5. 将确认过的改动推送并打 tag，或分发检查过的 `.tgz` 包。GitHub 安装需要代码已经推送；npm 包名安装需要实际完成 npm 发布。

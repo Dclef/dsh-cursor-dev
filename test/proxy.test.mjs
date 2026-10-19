@@ -23,10 +23,19 @@ test('a proxy becomes the variables the child CLI actually reads', () => {
     assert.equal(env.http_proxy, 'http://127.0.0.1:7890');
     assert.equal(env.ALL_PROXY, 'http://ignored:1', 'an unrelated variable is left alone');
     assert.equal(env.PATH, 'C:\\bin', 'the rest of the environment survives');
-    // Nothing is added when there is no proxy, and nothing is fought over when
-    // the operator already exported one.
     assert.deepEqual(withProxyEnvironment({ PATH: 'C:\\bin' }, undefined), { PATH: 'C:\\bin' });
-    assert.equal(withProxyEnvironment({ HTTPS_PROXY: 'http://kept:1' }, undefined).HTTPS_PROXY, 'http://kept:1');
+    const inherited = {
+        PATH: 'C:\\bin',
+        HTTPS_PROXY: 'http://env:1',
+        https_proxy: 'http://env:1',
+        HTTP_PROXY: 'http://env:1',
+        http_proxy: 'http://env:1',
+        ALL_PROXY: 'http://env:1',
+        all_proxy: 'http://env:1',
+    };
+    assert.deepEqual(withProxyEnvironment(inherited, undefined), { PATH: 'C:\\bin' });
+    assert.deepEqual(withProxyEnvironment(inherited, null), { PATH: 'C:\\bin' });
+    assert.equal(inherited.HTTPS_PROXY, 'http://env:1', 'the parent environment is unchanged');
 });
 
 test('the proxy setting says what it means, including "none"', async () => {
@@ -43,8 +52,7 @@ test('the proxy setting says what it means, including "none"', async () => {
     assert.equal(explicit.source, 'setting');
     // …and "none" means direct even when the machine has a proxy configured.
     assert.equal(await resolveChildProxy('none', { env: { HTTPS_PROXY: 'http://env:1' } }), undefined);
-    // An empty setting is the documented default: ask the environment, then the
-    // machine, which is what makes the full catalogue appear unconfigured.
+    assert.equal(await resolveChildProxy(undefined, { env: { HTTPS_PROXY: 'http://env:1' } }), undefined);
     const inherited = await resolveChildProxy('', { env: { HTTPS_PROXY: 'http://env:1' } });
     assert.equal(inherited.host, 'env');
     assert.equal(inherited.port, 1);
