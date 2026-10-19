@@ -38,7 +38,7 @@ agent status --format json
 
 ## 2. 选择安装来源
 
-**当前源码版本：** `0.12.1`，新增 macOS Keychain 登录凭据读取，并修正 CLI 子进程的默认直连与代理环境变量继承；面板没有 UI 改版。macOS Keychain 路径尚未实机验证。DSH 兼容性保持 `>=0.2.1-rc.2 <0.3.0-0`。npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。插件市场已收录本插件，卡片版本随目录探测更新。
+**当前源码版本：** `0.12.2`，新增额度耗尽保护（三个额度都到上限时提前拒绝，用量取不到时不拦截），`cursor_subagent` 生成的子会话可在面板点开查看轨迹，面板重排为额度置顶、代理输入框在模型选择上方。DSH 兼容性保持 `>=0.2.1-rc.2 <0.3.0-0`。npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。插件市场已收录本插件，卡片版本随目录探测更新。
 
 | 你要安装的内容 | 安装来源 |
 | --- | --- |
@@ -46,7 +46,7 @@ agent status --format json
 | npm 公共源上的已发布版本 | `dsh-cursor-dev`（`0.11.0` 起可用，按包内 `files` 白名单安装，版本以 npm 的 `latest` 标签为准） |
 | 公开仓库的当前版本（推荐） | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
 | 你本地的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
-| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.1.tgz` |
+| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.2.tgz` |
 
 表中本地路径是示例，需要换成实际位置。npm 来源取 registry 上发布的最新版本；Git 来源会取得仓库默认分支的最新提交；`.tgz` 是某一刻的固定快照——要跟进后续改动就用 Git 来源。
 
@@ -88,7 +88,7 @@ dsh plugin add "/home/you/plugins/dsh-cursor-dev"
 安装收到的包：
 
 ```powershell
-dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.1.tgz"
+dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.2.tgz"
 ```
 
 终端没有 `dsh` 命令时，使用桌面插件管理即可。不要把在任意项目目录执行 `npm install` 当成已经在 DSH 当前 profile 中启用插件。
