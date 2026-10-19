@@ -65,7 +65,7 @@ flowchart LR
 | --- | --- | --- |
 | `cursor_code` | 父模型派发完整任务，控制目录、模式、模型、会话与报告 | 工具结果回到调用它的父模型，包含答复、步骤和检测到的文件变更 |
 | `/cursor-subagent 任务内容` | 用户直接派发一次任务；可选前缀 `-m 模型` | 完成或失败后，插件把摘要交给原父代理继续处理 |
-| `cursor_subagent` | 当前源码新增的 DSH 原生一次性子智能体工具，可后台运行 | 使用 DSH 标准结果及后台任务机制；DSH 0.2.1 起这次运行在父会话里显示为一行 External 任务，可点击的镜像子会话只由 `cursor_code` 创建 |
+| `cursor_subagent` | 当前源码新增的 DSH 原生一次性子智能体工具，可后台运行 | 使用 DSH 标准结果及后台任务机制；父会话保留一行 External 任务，Cursor 面板里的会话行可直接打开实时镜像子对话 |
 
 例如，在一个空测试工作区发送：
 
@@ -239,7 +239,7 @@ The default model order is call argument → saved panel choice → plugin confi
 
 The current source registers a native DSH provider named `cursor` and a standard one-shot tool named `cursor_subagent`. Rich `cursor_code` calls also use the native lifecycle when those host services exist. The existing generic `subagent` backend remains configured as before.
 
-Cursor executes externally. From DSH 0.2.1 on, the host writes a single non-interactive `External` row for a `cursor_subagent` run; the clickable mirrored child conversation is created by `cursor_code`, which starts the provider directly. Standard background runs use DSH's job result and cancellation tools. Persistent mailbox continuation through `send_message`, and Cursor as a resident Agent Teams teammate, are not implemented. Use `cursor_code` with `continueSession` for explicit follow-ups.
+Cursor executes externally. From DSH 0.2.1 on, the host writes a single non-interactive `External` row for a `cursor_subagent` run. Both entrances also create a real transcript child that the Cursor panel opens while the first turn is running. The native service keeps its own lifecycle id; the separate transcript child does not add a duplicate catalog row. Standard background runs use DSH's job result and cancellation tools. Persistent mailbox continuation through `send_message`, and Cursor as a resident Agent Teams teammate, are not implemented. Use `cursor_code` with `continueSession` for explicit follow-ups.
 
 The parent remains responsible for reviewing the actual changes and verification evidence. File reports have scan limits and are not a substitute for final workspace checks. Cursor model availability and usage depend on the Cursor account; the parent model uses its separate DSH provider configuration.
 

@@ -128,13 +128,15 @@ async function harness(t, options = {}) {
     const pool = new SessionPool({ resolved: { command: 'fixture' }, env: {}, spawn: peer.spawn, maxLiveSessions: 8 }, (key, event) => {
         journal.append(key, event); mirrors.observe(key, event);
     });
-    const raw = cursorCodeTool({ pool, mirrors, journal, index, maxChildDepth: options.maxChildDepth,
+    const raw = cursorCodeTool({ pool, mirrors, journal, index, quotaGuard: options.quotaGuard,
+        maxChildDepth: options.maxChildDepth,
         resolveModelSelection: requested => resolveModelSelection({ model: 'auto', modelPolicy: 'panel' }, '', requested) });
-    const bridge = createNativeCursorBridge({ execute: raw.execute, mirrors, maxChildDepth: options.maxChildDepth });
+    const bridge = createNativeCursorBridge({ execute: raw.execute, mirrors, quotaGuard: options.quotaGuard,
+        maxChildDepth: options.maxChildDepth });
     const providers = new Map();
     const lifecycle = [];
-    /** Models dsh >= 0.2.1: the subagents service admits the provider run, rejects
-     * an already-registered child id, and owns the external catalog row itself. */
+    /** Service fixture: publishes one external lifecycle row and keeps run ids
+     * separate from locally registered transcript children. */
     const runtime = {
         registerProvider(provider) {
             assert.equal(providers.has(provider.name), false);
@@ -169,7 +171,7 @@ async function harness(t, options = {}) {
         };
     }
     const start = (task = 'perform the task', signal) => runtime.startActivation({
-        provider: 'cursor', request: { parent, prompt: [{ type: 'text', text: task }] }, signal, label: 'task' });
+        provider: 'cursor', request: { parent, prompt: [{ type: 'text', text: task }], descriptor: options.descriptor }, signal, label: 'task' });
     t.after(async () => {
         peer.stop();
         await bridge.dispose();
@@ -204,6 +206,22 @@ test('late native binding registers honest capabilities and preserves standalone
     assert.equal(h.providers.size, 0);
 });
 
+test('a confirmed exhausted quota blocks native and direct calls before any child or process is created', async t => {
+    const quotaGuard = { check: async () => ({ blocked: true, source: 'usage' }) };
+    const native = await harness(t, { quotaGuard });
+    await assert.rejects(native.start('must not start'), /CURSOR_QUOTA_EXHAUSTED/);
+    assert.equal(native.lifecycle.length, 0, 'the host never publishes an external child row');
+    assert.equal(native.children.size, 0);
+    assert.equal(native.peer.peers.length, 0, 'no Cursor process is spawned');
+
+    const direct = await harness(t, { quotaGuard });
+    const report = await direct.raw.execute({ task: 'must not start' }, { agent: direct.parent });
+    assert.equal(report.ok, false);
+    assert.match(report.error, /CURSOR_QUOTA_EXHAUSTED/);
+    assert.equal(direct.children.size, 0);
+    assert.equal(direct.peer.peers.length, 0, 'the direct tool also refuses before spawn');
+});
+
 test('cursor_code starts the native provider directly, keeps rich diffs and continues the same child once in the catalog', async t => {
     const h = await harness(t);
     const next = h.peer.next();
@@ -234,28 +252,43 @@ test('cursor_code starts the native provider directly, keeps rich diffs and cont
     assert.equal(h.children.get(first.childSessionId).session.snapshotEvents().filter(event => event.type === 'turn/end').length, 2);
 });
 
-test('direct native calls publish before the prompt and use independent conversations', async t => {
-    const h = await harness(t);
+test('native service runs publish one external row and a separate live transcript child', async t => {
+    const h = await harness(t, { descriptor: { version: 2, mode: 'external', provider: 'cursor' } });
     const next = h.peer.next();
     const first = await h.start('first');
     assert.equal(first.run.localAgent, undefined, 'Cursor executes externally, not in the DSH Agent loop');
     assert.match(first.childId, /^cursor-/, 'the service receives a fresh opaque child id');
-    assert.equal(h.children.size, 0, 'an external run has no local transcript mirror');
     const prompt = await next;
+    const live = h.mirrors.snapshot()[0];
+    assert.ok(live.childSessionId, 'the running first turn already has a navigable child');
+    assert.notEqual(live.childSessionId, first.childId, 'the registered mirror id is never handed to the native service');
+    assert.equal(h.children.size, 1);
+    assert.equal(h.pool.snapshot()[0].running, true);
+    assert.equal(h.saved.size, 0, 'opening the running child does not depend on a completed durable turn');
+    const child = h.children.get(live.childSessionId);
+    assert.equal(child.session.snapshotEvents().find(event => event.type === 'subagent/descriptor').data.mode, 'one-shot');
+    assert.ok(child.session.snapshotEvents().some(event => event.type === 'user/message'));
     prompt.textChunk('native answer'); prompt.finish();
     const result = await first.result;
     assert.equal(result.stopReason, 'completed');
     assert.match(result.output[0].text, /native answer/);
+    assert.ok(child.session.snapshotEvents().some(event => event.type === 'turn/end'));
+    assert.match(JSON.stringify(child.session.snapshotEvents()), /native answer/);
     const rows = h.parent.session.snapshotEvents().filter(event => event.type === 'subagent/catalog');
-    assert.equal(rows.length, 1, 'the service writes the only row for an external run');
+    assert.equal(rows.length, 1, 'the hidden mirror does not duplicate the service catalog row');
     assert.equal(rows[0].data.mode, 'external');
+    const a = await first.run.cursorReport;
+    assert.equal(a.childSessionId, live.childSessionId);
+    assert.equal(h.saved.get(a.conversationKey).childSessionId, live.childSessionId);
     await first.dispose();
+    assert.equal(h.mirrors.snapshot().length, 0, 'the completed run releases its live mirror lease');
+    assert.equal(h.releases.length, 1);
     const nextSecond = h.peer.next();
     const second = await h.start('second');
     (await nextSecond).finish();
     await second.result;
     assert.notEqual(first.childId, second.childId);
-    const a = await first.run.cursorReport, b = await second.run.cursorReport;
+    const b = await second.run.cursorReport;
     assert.notEqual(a.conversationKey, b.conversationKey);
     assert.equal(a.model, 'default[]');
     const dispose = second.dispose();
@@ -275,6 +308,8 @@ test('a queued native run aborts promptly without starting a second CLI or stopp
     abort.abort();
     assert.equal((await queued.result).stopReason, 'aborted');
     await queued.dispose();
+    assert.equal(h.mirrors.snapshot().length, 1, 'only the running task keeps its mirror');
+    assert.equal(h.mirrors.snapshot()[0].open, true, 'canceling a queued task does not close the active transcript');
     assert.equal(h.peer.peers.length, 1);
     assert.equal(h.peer.peers[0].terminations, 0);
     prompt.finish();
@@ -293,13 +328,14 @@ test('disposing an external run cancels ACP and waits for managed process exit',
     const disposing = run.dispose().then(() => { disposed = true; });
     await prompt.peer.terminated.promise;
     assert.equal(disposed, false);
-    assert.equal(h.releases.length, 0, 'an external run holds no mirror lease');
+    assert.equal(h.releases.length, 0, 'the live mirror stays leased until the Cursor process exits');
     assert.ok(prompt.peer.requests.some(request => request.method === 'session/cancel'));
     prompt.peer.finish();
     await disposing;
     assert.equal((await run.result).stopReason, 'aborted');
     assert.match((await run.result).output[0].text, /partial answer/);
-    assert.equal(h.releases.length, 0);
+    assert.equal(h.releases.length, 1, 'the canceled run releases exactly its own mirror');
+    assert.equal(h.mirrors.snapshot().length, 0);
 });
 
 test('prompt failure after publication settles as an error and preserves partial text', async t => {
@@ -387,8 +423,8 @@ test('a native request cwd wins over the parent session workspace', async t => {
         mirrors: { release: async () => {} },
         execute: async (args, exec) => {
             seen.push(args.workspaceRoot);
-            exec.cursorLifecycle.opened?.({ entry: { child: { id: 'session-mirror',
-                session: { header: { id: 'session-mirror', createdAt: 1 } } } }, key: 'run' });
+            exec.cursorLifecycle.opened?.({ child: { id: 'session-mirror',
+                session: { header: { id: 'session-mirror', createdAt: 1 } } } }, 'run');
             return { ok: true, sessionKey: 'k', stopReason: 'end_turn', durationMs: 0, steps: [], changes: [] };
         },
     });

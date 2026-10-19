@@ -202,7 +202,7 @@ continueSession 设为 true。让 Cursor 说明上一轮做了什么，再核对
 | 显示 usage limit | 检查 Cursor 账号额度和模型可用性；更换父模型不会改变 Cursor 账号额度 |
 | 父模型没有调用插件 | 确认插件已启用、工具允许使用且父模型支持工具调用；明确要求使用 `cursor_code` 或直接用斜杠命令 |
 | 有 `cursor_code`，没有 `cursor_subagent` | 确认所装版本包含原生接入、bundle 配置已应用，以及当前 profile 提供子智能体和任务服务；升级后重启 |
-| DSH 升到 0.2.1 后 `cursor_subagent` 不再有可点击的镜像子会话 | 0.2.1 起宿主只用一行 External 任务表示外部子智能体，本插件的镜像因此只保留在 `cursor_code` 路径；运行结果、取消和后台机制不变 |
+| 点击运行中的 `cursor_subagent` 会话只显示运行轨迹 | 更新插件后台并重启 DSH；新版从首轮运行时即建立镜像，在 Cursor 面板中点击会话键即可打开子对话。宿主仍保留一行 External 任务；旧版本留下的已完成记录可在历史会话中读回 |
 | 更新后页面还是旧的 | 检查更新的是当前 profile 中实际加载的包，再重启 DSH 并刷新浏览器；只修改另一份源码不会自动更新所有安装副本 |
 | 续聊没有原来的内容 | 确认父会话、`sessionLabel` 和工作区；检查是否重置过映射、删除过 Cursor 记录，或发生了加载失败回退 |
 | 想彻底开始新任务 | 使用新 `sessionLabel`，或对原标签设置 `resetSession:true`；不要只依赖 `continueSession:false` 清空历史 |

@@ -4,19 +4,19 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
-import { registerUsageRoutes } from '../lib/usage.js';
+import { normalizeUsage, registerUsageRoutes } from '../lib/usage.js';
 
 // The panel is an iframe inside the app, so its layout is the one thing an
 // offline test cannot look at. What it *can* pin is the two structures that
 // decide the layout: the scroll container that keeps an 84-character session key
 // from widening the page, and the client-side filter that narrows the model
 // picker. Both are asserted on the real emitted HTML and the real inline script.
-async function panel(t) {
+async function panel(t, quotaGuard) {
     const dir = await mkdtemp(join(tmpdir(), 'cursor-panel-ui-'));
     t.after(() => rm(dir, { recursive: true, force: true }));
     const routes = new Map();
     registerUsageRoutes({ get: () => ({ register: route => routes.set(route.path, route) }) }, {
-        dataDir: dir, pool: { snapshot: () => [] }, index: { list: () => [] },
+        dataDir: dir, pool: { snapshot: () => [] }, index: { list: () => [] }, quotaGuard,
     });
     let html;
     await routes.get('/plugins/dsh-cursor-dev/').handler({ url: '/', method: 'GET' }, {
@@ -28,16 +28,22 @@ async function panel(t) {
     function element(tag = 'div') {
         let content = '', selected = '';
         return {
-            tag, children: [], style: {}, listeners: {}, checked: false,
+            tag, children: [], style: {}, listeners: {}, attributes: {}, checked: false, hidden: false,
             get textContent() { return content; },
             set textContent(value) { content = value; this.children = []; },
             get value() { return tag === 'select' && !this.children.some(child => child.value === selected) ? '' : selected; },
             set value(value) { selected = value; },
+            // A progress bar's fill is the <i> the markup puts inside it.
+            get firstElementChild() { return this.children[0] || this.appendChild(element('i')); },
+            setAttribute(name, value) { this.attributes[name] = String(value); },
+            removeAttribute(name) { delete this.attributes[name]; },
             appendChild(child) { this.children.push(child); return child; },
             addEventListener(name, callback) { this.listeners[name] = callback; },
         };
     }
     const document = {
+        documentElement: {},
+        querySelectorAll: () => [],
         createElement: element,
         getElementById(id) {
             if (!nodes.has(id)) nodes.set(id, element(id === 'model' ? 'select' : 'div'));
@@ -76,14 +82,38 @@ async function panel(t) {
     },
     forget: function (key) { forgetRow({ key: key }); },
     armed: function () { return armedFor; },
-    calls: function () { return calls; }
+    calls: function () { return calls; },
+    render: render,
+    lang: function (value) { LANG = value; applyLanguage(); },
+    keys: function () { return [Object.keys(T.zh), Object.keys(T.en)]; }
   };
   return;
   applyLanguage();
 `);
     assert.notEqual(executable, source, 'test harness intercepts initial network polling');
     runInNewContext(executable, context);
-    return { html, ...context.panelTest };
+    return { html, node: id => document.getElementById(id), ...context.panelTest };
+}
+
+/** The account the screenshot came from: spend includes a large bonus, the limit does not. */
+function usage(plan = {}) {
+    return {
+        ok: true, fetchedAt: 1, extended: { live: [], conversations: [] },
+        usage: normalizeUsage({
+            planUsage: {
+                totalSpend: 36564, includedSpend: 2000, bonusSpend: 34564, limit: 2000,
+                totalPercentUsed: 79.3, autoPercentUsed: 80.1, apiPercentUsed: 45.8, ...plan,
+            },
+            autoModelSelectedDisplayMessage: 'You have used 80% of your Auto usage',
+            namedModelSelectedDisplayMessage: 'You have used 46% of your API usage',
+        }),
+    };
+}
+
+/** The markup of one <section>, from its id to its closing tag. */
+function section(html, id) {
+    const start = html.indexOf(`id="${id}"`);
+    return html.slice(start, html.indexOf('</section>', start));
 }
 
 const MODELS = [
@@ -100,7 +130,101 @@ test('a long session key cannot widen the page: every table sits in a scroll con
     const tables = html.match(/<table>/g) || [];
     assert.equal(tables.length, 2, 'and no bare table is left outside one');
     assert.match(html, /\.tablewrap \{ overflow-x: auto;/, 'the wrapper, not <body>, owns the horizontal scroll');
-    assert.match(html, /minmax\(min\(220px, 100%\), 1fr\)/, 'a narrow panel wraps the quota cards instead of clipping them');
+    assert.match(html, /select \{[^}]*min-width: min\(180px, 100%\)/, 'a 220px panel shrinks the picker instead of overflowing');
+    assert.match(html, /body \{[^}]*max-width: \d+px/, 'a wide window does not stretch the panel edge to edge');
+});
+
+test('the four quota cards come first, then the model, then the sessions', async t => {
+    const { html } = await panel(t);
+    const at = needle => html.indexOf(needle);
+    assert.ok(at('id="usage-overview"') > 0);
+    assert.ok(at('id="usage-overview"') < at('id="modelcard"'), 'quota above the model picker');
+    assert.ok(at('id="modelcard"') < at('data-t="live"'), 'model picker above the sessions');
+    const cards = section(html, 'usage-overview');
+    assert.equal((cards.match(/<article class="card quota-card">/g) || []).length, 4, 'each usage figure has its own card');
+    assert.ok(cards.indexOf('id="total-pct"') < cards.indexOf('id="auto-pct"'));
+    assert.ok(cards.indexOf('id="auto-pct"') < cards.indexOf('id="api-pct"'));
+    assert.ok(cards.indexOf('id="api-pct"') < cards.indexOf('id="spend"'));
+    assert.doesNotMatch(html, /[^-\w]order\s*:/, 'no CSS order fights the DOM order');
+    const overview = section(html, 'usage-overview');
+    for (const id of ['total-pct', 'total-bar', 'total-sub', 'auto-pct', 'auto-bar', 'auto-sub',
+        'api-pct', 'api-bar', 'api-sub', 'spend', 'spend-sub', 'cycle', 'message']) {
+        assert.match(overview, new RegExp(`id="${id}"`), `${id} lives in the overview`);
+    }
+    assert.equal((overview.match(/role="progressbar"/g) || []).length, 3);
+    // The picker, the lock and the proxy stay outside the folds; only the long
+    // catalogue and the diagnostic line fold away.
+    const model = section(html, 'modelcard');
+    const firstFold = model.indexOf('<details');
+    for (const id of ['model', 'model-save', 'model-lock', 'model-status', 'proxy']) {
+        const where = model.indexOf(`id="${id}"`);
+        assert.ok(where > 0 && where < firstFold, `${id} is visible without unfolding anything`);
+    }
+    assert.ok(model.indexOf('id="proxy"') < model.indexOf('<select id="model"'),
+        'the proxy sits above the picker: a wrong one is why the list looks short');
+    for (const id of ['model-reload', 'model-filter', 'model-list', 'model-state']) {
+        assert.ok(model.indexOf(`id="${id}"`) > firstFold, `${id} sits in a fold`);
+    }
+    assert.doesNotMatch(model, /<details[^>]* open/, 'the folds start closed');
+    assert.match(model, /<select id="model" aria-labelledby="model-title">/);
+    assert.match(model, /<label[^>]* for="proxy"/);
+});
+
+test('the quota shows the upstream percentages and splits the spend without mixing denominators', async t => {
+    const p = await panel(t);
+    p.render(usage());
+    assert.deepEqual(['total', 'auto', 'api'].map(name => p.node(`${name}-pct`).textContent),
+        ['79.3%', '80.1%', '45.8%'], 'the three upstream percentages are shown untouched');
+    assert.equal(p.node('spend').textContent, '$365.64');
+    assert.equal(p.node('spend-sub').textContent, '套餐内 $20.00 · 赠送 $345.64');
+    // $365.64 of $20 would contradict the 79.3% right above it.
+    assert.equal(p.node('total-sub').textContent, '剩余 20.7% · 偏高');
+    assert.doesNotMatch(p.node('total-sub').textContent, /\$/);
+    assert.equal(p.node('api-sub').textContent, '剩余 54.2%');
+    assert.equal(p.node('auto-sub').title, 'You have used 80% of your Auto usage', 'the raw upstream sentence is kept as a tooltip');
+    assert.equal(p.node('total-bar').firstElementChild.style.width, '79.3%');
+    assert.equal(p.node('total-bar').className, 'bar warn');
+    assert.equal(p.node('total-bar').attributes['aria-valuenow'], '79.3');
+    assert.equal(p.node('message-box').hidden, true, 'no official note, no empty fold');
+});
+
+test('an unknown or out-of-range percentage never paints a misleading bar', async t => {
+    const p = await panel(t);
+    p.render(usage({ totalPercentUsed: undefined, autoPercentUsed: 135, apiPercentUsed: -4 }));
+    assert.equal(p.node('total-pct').textContent, '—', 'no data is not 0% used');
+    assert.equal(p.node('total-sub').textContent, '暂无数据');
+    assert.equal(p.node('total-bar').firstElementChild.style.width, '0%');
+    assert.equal('aria-valuenow' in p.node('total-bar').attributes, false, 'an unknown bar has no value');
+    assert.equal(p.node('total-bar').attributes['aria-valuetext'], '暂无数据');
+    assert.equal(p.node('auto-pct').textContent, '135.0%', 'the upstream figure is still reported as is');
+    assert.equal(p.node('auto-bar').firstElementChild.style.width, '100%', 'but the bar cannot leave its track');
+    assert.equal(p.node('auto-bar').attributes['aria-valuenow'], '100');
+    assert.equal(p.node('auto-bar').className, 'bar bad');
+    assert.equal(p.node('auto-sub').textContent, '剩余 0.0% · 接近上限');
+    assert.equal(p.node('api-bar').firstElementChild.style.width, '0%');
+});
+
+test('switching language repaints the quota in the same terms', async t => {
+    const p = await panel(t);
+    const [zh, en] = p.keys();
+    assert.deepEqual([...en].sort(), [...zh].sort(), 'every label exists in both languages');
+    p.render(usage());
+    p.lang('en');
+    assert.equal(p.node('total-pct').textContent, '79.3%');
+    assert.equal(p.node('total-sub').textContent, 'remaining 20.7% · high');
+    assert.equal(p.node('spend-sub').textContent, 'included $20.00 · bonus $345.64');
+    assert.equal(p.node('total-bar').attributes['aria-valuetext'], '79.3%');
+    p.lang('zh');
+    assert.equal(p.node('total-sub').textContent, '剩余 20.7% · 偏高');
+});
+
+test('the quota alert is visible while blocked and clears after a successful refresh', async t => {
+    const p = await panel(t, { snapshot: () => ({ blocked: true, source: 'cursor-error' }) });
+    assert.match(p.html, /id="quota-alert"[^>]*role="alert"[^>]*hidden[^>]*data-t="quotaBlocked"/);
+    p.render({ ok: true, extended: { live: [], conversations: [], quotaGuard: { blocked: true, source: 'cursor-error' } } });
+    assert.equal(p.node('quota-alert').hidden, false, 'the blocked state is visible');
+    p.render({ ok: true, extended: { live: [], conversations: [], quotaGuard: { blocked: false, source: 'usage' } } });
+    assert.equal(p.node('quota-alert').hidden, true, 'a successful clear snapshot removes the warning');
 });
 
 test('the history list is bounded and can be folded away, so it cannot grow the page', async t => {

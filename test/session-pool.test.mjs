@@ -119,6 +119,29 @@ function fakeAcp(current = 'composer-2.5[fast=true]', replay = []) {
     };
 }
 
+/** The panel must not replay a conversation while its writer holds the turn. */
+test('live snapshots expose running state and clear it on success or failure', async () => {
+    const stub = fakeAcp();
+    const pool = new SessionPool({ resolved: { command: 'stub', entry: undefined }, spawn: stub.spawn }, () => {});
+    const cwd = tmpdir();
+    const options = { key: 'running::default#1', storeKey: 'running::default#0', cwd };
+    try {
+        await pool.run(options, async () => {
+            assert.equal(pool.snapshot()[0].running, true);
+        });
+        assert.equal(pool.snapshot()[0].running, false);
+        await assert.rejects(pool.run(options, async () => {
+            assert.equal(pool.snapshot()[0].running, true);
+            throw new Error('turn failed');
+        }), /turn failed/);
+        assert.equal(pool.snapshot()[0].running, false);
+    }
+    finally {
+        await pool.dispose();
+        stub.stop();
+    }
+});
+
 /**
  * Mirror of the gate in lib/tool.js: `modelChanged` from the pool's own view.
  *
