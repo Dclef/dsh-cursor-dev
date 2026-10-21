@@ -274,6 +274,12 @@ test('the package manifest is installable as a DSH bundle', async () => {
     assert.equal(manifest.name, 'dsh-cursor-dev');
     assert.equal(manifest.type, 'module');
     assert.equal(manifest.main, 'lib/index.js');
+    assert.equal(
+        manifest.engines?.dsh,
+        '0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-rc.1 || >=0.2.1-rc.2 <0.3.0-0',
+    );
+    assert.equal(manifest.devDependencies?.['@deepseek-ai/dsh'], '0.2.1-rc.2');
+    assert.equal(manifest.dependencies?.['@deepseek-ai/dsh'], undefined);
     // dsh.bundle.patch is the installation contract: without it DSH installs the
     // package and mounts nothing.
     const patch = manifest.dsh?.bundle?.patch;

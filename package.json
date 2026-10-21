@@ -2,7 +2,7 @@
   "name": "dsh-cursor-dev",
   "displayName": "Cursor 子智能体",
   "description": "把 Cursor CLI 当作子编码智能体来写业务代码：cursor_code 与 cursor_subagent 都提供可从面板点开的实时子对话，原生任务保留宿主的 External 运行记录；可按任务选模型、会话在 DSH 重启后仍能续聊、返回逐步工具时间线与真实文件 diff，并自带额度/模型/会话面板。",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
@@ -22,7 +22,7 @@
   ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
-    "dsh": ">=0.2.1-rc.2 <0.3.0-0"
+    "dsh": "0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-rc.1 || >=0.2.1-rc.2 <0.3.0-0"
   },
   "scripts": {
     "test": "node --test --test-force-exit \"test/**/*.test.mjs\""
@@ -55,6 +55,9 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.4.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh": "0.2.1-rc.2"
   },
   "peerDependencies": {
     "@deepseek-ai/schemastery": "^3.18.1"
