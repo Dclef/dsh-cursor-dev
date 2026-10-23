@@ -15,7 +15,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, readdir, mkdir, rm } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';import { createServer } from 'node:http';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,6 +35,15 @@ import { writeSettings } from '../lib/settings.js';
 const here = fileURLToPath(new URL('..', import.meta.url));
 /** The resolved Cursor CLI on this machine, or undefined when not installed. */
 const agent = resolveAgent(process.env);
+
+// Booting the plugin makes it keep Cursor's own `cli-config.json` free of the
+// commit-attribution trailer, and this suite really does boot it. Point that
+// lookup at a throwaway directory so running the tests never edits the Cursor
+// settings of the machine they run on.
+process.env.CURSOR_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'dsh-cursor-dev-attribution-env-'));
+process.on('exit', () => {
+    rmSync(process.env.CURSOR_CONFIG_DIR, { recursive: true, force: true });
+});
 
 /**
  * A stand-in for the host's `ctx.subprocess.spawn`.
@@ -266,7 +276,10 @@ test('every lib module imports and the entry point is a valid plugin', async () 
     assert.equal(config.maxScanFiles, 20000);
     assert.equal(config.usageUi, true);
     assert.equal(config.usageBaseUrl, 'https://api2.cursor.sh');
-    assert.equal(config.maxChildDepth, 1, 'only a top-level parent may start a Cursor child by default');
+    // `2`, not the platform's `1`: a Cursor run is a leaf (the CLI has no DSH
+    // tools), so the levels above 2 do not exist and the useful default is the
+    // one where a teammate can drive the tool.
+    assert.equal(config.maxChildDepth, 2, 'a subagent may start a Cursor child by default');
 });
 
 test('the package manifest is installable as a DSH bundle', async () => {

@@ -233,7 +233,10 @@ function cliDeps(dir, spawn, extra = {}) {
     return {
         spawn,
         resolved: { command: 'node.exe', entry: 'index.js', source: 'bundled' },
-        env: {},
+        // Point Cursor's config lookup at the throwaway directory: the
+        // attribution switch writes a real file, and a test must never edit the
+        // config of the machine it runs on.
+        env: { CURSOR_CONFIG_DIR: dir },
         cwd: dir,
         dataDir: dir,
         configModel: '',
@@ -394,10 +397,14 @@ test('the settings API reports the state the panel needs to render', async () =>
             mode: '',
             language: 'en',
             proxy: 'none',
+            // Nothing saved: the panel shows the config default instead.
+            maxChildDepth: '',
+            attribution: 'off',
             disabledModels: [],
             updatedAt: json.settings.updatedAt,
         });
         assert.equal(json.effectiveModel, 'kimi-k3-max', 'the panel choice is what a run would use');
+        assert.equal(json.effectiveMaxChildDepth, 2, 'an untouched install runs the config default');
         assert.equal(json.configModel, 'composer-2.5');
         assert.equal(json.agent.command, 'node.exe');
         assert.equal(json.models.ok, true);
@@ -443,6 +450,34 @@ test('the settings API writes what the panel sends, and only that', async () => 
         assert.deepEqual(denied.json.settings.disabledModels, ['gpt-5.2-codex', 'default[]'],
             'duplicates drop and Auto is stored as the CLI id');
         assert.deepEqual(readSettings(dir).disabledModels, ['gpt-5.2-codex', 'default[]']);
+
+        // The depth cap is the one number that has to survive a round trip: the
+        // panel shows what it stored, and 0 is a real choice, not "unset".
+        const refused = await call(route, { method: 'POST', body: JSON.stringify({ maxChildDepth: 0 }) });
+        assert.equal(refused.json.settings.maxChildDepth, 0, 'zero is stored, not confused with "follow the config"');
+        assert.equal(refused.json.effectiveMaxChildDepth, 0);
+        const topOnly = await call(route, { method: 'POST', body: JSON.stringify({ maxChildDepth: 1 }) });
+        assert.equal(topOnly.json.effectiveMaxChildDepth, 1);
+        const nonsense = await call(route, { method: 'POST', body: JSON.stringify({ maxChildDepth: 9 }) });
+        assert.equal(nonsense.json.settings.maxChildDepth, '',
+            'a value the panel cannot offer is dropped, so the config default takes over');
+        assert.equal(nonsense.json.effectiveMaxChildDepth, 2);
+
+        // Attribution is a two-part answer: the choice stored here, and what
+        // Cursor's own file says. Saving the choice has to write that file now,
+        // because nothing else would until the next spawn.
+        assert.equal(readSettings(dir).attribution, 'off', 'off is the default');
+        const credited = await call(route, { method: 'POST', body: JSON.stringify({ attribution: 'on' }) });
+        assert.equal(credited.json.settings.attribution, 'on');
+        assert.equal(credited.json.attribution.attribution.attributeCommitsToAgent, true,
+            'the answer reports the file, not the intent');
+        const followed = await call(route, { method: 'POST', body: JSON.stringify({ attribution: 'keep' }) });
+        assert.equal(followed.json.settings.attribution, 'keep');
+        assert.equal(followed.json.attribution.attribution.attributeCommitsToAgent, true,
+            'keep leaves the file exactly as it was');
+        const typo = await call(route, { method: 'POST', body: JSON.stringify({ attribution: 'yes' }) });
+        assert.equal(typo.json.settings.attribution, 'keep',
+            'a word the panel never offers must not silently disable attribution');
 
         const noBody = await call(route, { method: 'POST' });
         assert.equal(noBody.status, 200, 'an empty body is a read, not an error');

@@ -30,6 +30,7 @@ async function panel(t) {
             set textContent(value) { content = value; this.children = []; },
             get value() { return tag === 'select' && !this.children.some(child => child.value === selected) ? '' : selected; },
             set value(value) { selected = value; },
+            get options() { return this.children; },
             appendChild(child) { this.children.push(child); return child; },
             addEventListener(name, callback) { this.listeners[name] = callback; },
         };
@@ -37,7 +38,7 @@ async function panel(t) {
     const document = {
         createElement: element,
         getElementById(id) {
-            if (!nodes.has(id)) nodes.set(id, element(id === 'model' ? 'select' : 'div'));
+            if (!nodes.has(id)) nodes.set(id, element(id === 'model' || id === 'depth' || id === 'attribution' ? 'select' : 'div'));
             return nodes.get(id);
         },
     };
@@ -93,7 +94,9 @@ test('the panel saves Auto and the lock together', async t => {
     ui.nodes.get('model-save').listeners.click();
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(JSON.parse(ui.requests[0].options.body), {
-        model: 'default[]', modelPolicy: 'panel', proxy: '', disabledModels: [],
+        // The depth picker travels with the same save: one click must not
+        // leave the cap it shows unsaved.
+        model: 'default[]', modelPolicy: 'panel', proxy: '', maxChildDepth: 2, attribution: 'off', disabledModels: [],
     });
     assert.match(ui.nodes.get('model-state').textContent, /已锁定模型/);
 });

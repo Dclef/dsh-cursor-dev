@@ -55,7 +55,7 @@ flowchart LR
 3. 按 DSH 提示完成加载；涉及后台代码更新时重启 DSH，然后刷新页面。在 Cursor 面板中选择模型并保存。
 4. 明确告诉父模型使用 `cursor_code`，或者用下面的斜杠命令派发第一个任务。
 
-**版本说明（0.12.3）：** 本版显式声明支持 DSH `0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1` 和 `0.2.1-rc.2`，开发依赖 `@deepseek-ai/dsh` 精确固定为 `0.2.1-rc.2`，保留 `>=0.2.1 <0.3.0` 的稳定版本支持。保留额度耗尽保护：调用 `cursor_code` 或通过原生子智能体派发之前先检查 Cursor 用量，总、Auto、API 三个额度都到上限时直接拒绝并说明原因，不再把任务派出去后中途失败；用量接口暂时取不到时不拦截调用。`cursor_subagent` 也会生成可点击的对话子会话，面板里点运行中或已完成的行都能查看过程，不再报「没有可恢复的会话」。面板保留额度四张卡片置顶、代理输入框在模型选择上方、模型目录与来源说明折叠收起的布局。插件市场已收录本插件，卡片版本随目录探测更新；npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
+**版本说明（0.12.3）：** 本版显式声明支持 DSH `0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1` 和 `0.2.1-rc.2`，开发依赖 `@deepseek-ai/dsh` 精确固定为 `0.2.1-rc.2`，保留 `>=0.2.1 <0.3.0` 的稳定版本支持。保留额度耗尽保护：调用 `cursor_code` 或通过原生子智能体派发之前先检查 Cursor 用量，总、Auto、API 三个额度都到上限时直接拒绝并说明原因，不再把任务派出去后中途失败；用量接口暂时取不到时不拦截调用。`cursor_subagent` 也会生成可点击的对话子会话，面板里点运行中或已完成的行都能查看过程，不再报「没有可恢复的会话」。插件市场已收录本插件，卡片版本随目录探测更新；npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
 
 运行要求：DSH `0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1`、`0.2.1-rc.2` 或 `>=0.2.1 <0.3.0` 的稳定版本（已在 `0.2.1-rc.2` 上验证）；Node.js `^22.19.0 || >=24.0.0`；已登录且可访问服务的 Cursor CLI。原生子智能体功能需要 DSH 的 `subagents`、`agents` 服务，后台任务还需要对应任务服务，建议使用当前 DSH 桌面版。CLI 安装方法见 [Cursor 官方文档](https://cursor.com/docs/cli)。
 
@@ -163,7 +163,7 @@ flowchart LR
 | `toolName` | `cursor_code` | 编码工具的注册名 |
 | `usageUi` | `true` | 是否挂载状态、额度和面板 HTTP 路由 |
 | `usageBaseUrl` | `https://api2.cursor.sh` | Cursor 额度 API 地址 |
-| `maxChildDepth` | `1` | Cursor 子会话允许达到的深度上限，调用方深度必须小于该值 |
+| `maxChildDepth` | `2` | Cursor 子会话允许达到的深度上限，调用方深度必须小于该值（面板「子代理深度」可覆盖） |
 
 插件自动探测 CLI 的 PATH 和已知安装目录。探测失败时，可在插件配置里设置 `command` 指向可启动的二进制、安装根目录、`agent.cmd`，或 `"node.exe" "index.js"`；非空时只使用该路径，不再回退到自动探测。安装排错以[指南](docs/INSTALL.md#6-常见问题)为准。
 
@@ -183,9 +183,29 @@ flowchart LR
 
 模型卡片下方还有可搜索的模型浏览器：点一行设为面板模型，右边的开关决定它是否出现在上方下拉框里。关掉的模型只是藏起来（写入 `disabledModels`），点「保存」后生效，随时可以再打开——这样在完整目录有上百个模型时也能只留下写业务常用的几条。
 
-`maxChildDepth` 限制的是**谁能启动 Cursor 子会话**：深度为 `0` 的顶层智能体是正常调用方，深度 `1` 的子智能体再调用就会被拒绝（默认上限 `1`，即只允许父智能体创建子智能体）。拒绝发生在创建任何进程或子会话之前，`cursor_code` 立即返回 `sessionKey: "depth-refused"`，`cursor_subagent` 抛出同类错误，错误信息里带有当前深度和上限。宿主本身对 `subagent` / `subagent_fork` 的深度限制（面板「子智能体 → 运行限制 → 最大递归深度」）仍然生效；`cursor` provider 声明 `depthLimit: false`，无法接收数值型 `maxDepth`，所以这道限制由本插件自己执行。把 `maxChildDepth` 设为 `0` 可以完全禁止子会话，设为 `2` 或更大则允许更深一层。镜像历史（面板里的记录）不受此限制，仍可正常打开查看。
+`maxChildDepth` 限制的是**谁能启动 Cursor 子会话**：深度为 `0` 的顶层智能体是正常调用方，深度 `1` 的子智能体再调用就会被拒绝。默认值是 `2`，即允许父智能体和子智能体都创建 Cursor 子会话——Cursor 是个叶节点（CLI 里没有 DSH 工具，它不可能再往下派），所以 `2` 就是实际上限，再大的值和 `2` 完全等价。这个值可以在面板的「子代理深度」里改，面板的选择优先于配置；改完下一次调用生效，不需要重载插件。拒绝发生在创建任何进程或子会话之前，`cursor_code` 立即返回 `sessionKey: "depth-refused"`，`cursor_subagent` 抛出同类错误，错误信息里带有当前深度和上限。宿主本身对 `subagent` / `subagent_fork` 的深度限制（面板「子智能体 → 运行限制 → 最大递归深度」）仍然生效；`cursor` provider 声明 `depthLimit: false`，无法接收数值型 `maxDepth`，所以这道限制由本插件自己执行。把 `maxChildDepth` 设为 `0` 可以完全禁止子会话，设为 `2` 或更大则允许更深一层。镜像历史（面板里的记录）不受此限制，仍可正常打开查看。
 
 插件设置与会话映射优先写入环境变量 `DSH_CURSOR_DEV_DATA` 指定的目录；否则使用 `%LOCALAPPDATA%/dsh-cursor-dev`；没有该环境变量时使用 DSH 提供的 `baseDir` 下的 `.data`（再无 `baseDir` 时回退到进程当前目录）。Cursor 登录和原始会话由 Cursor 自己保存。面板写操作包含同源检查，HTTP 可访问范围由 DSH 的监听配置决定。
+
+### Cursor 署名
+
+Cursor 默认会在子智能体做的提交上追加 `Co-authored-by: Cursor`，在它开的 PR 上署名。这些提交发生在别人的仓库里，而仓库的读者并没有同意这件事，所以面板里默认**关掉**：模型卡片底部的「Cursor 署名」选择「不加 Cursor 署名」，插件在下一次启动 CLI 前把 Cursor 自己的配置文件改成不署名。
+
+这个开关没有 CLI 参数，也没有环境变量，只存在于 Cursor 的 `cli-config.json`：
+
+```json
+{ "attribution": { "attributeCommitsToAgent": false, "attributePRsToAgent": false } }
+```
+
+文件位置按 Cursor 自己的顺序解析：`CURSOR_CONFIG_DIR` → `XDG_CONFIG_HOME/cursor` → `~/.cursor`。插件只改 `attribution` 这两项，权限、模型、登录信息等其他键原样保留，写入走临时文件 + 改名；解析不了的文件不会被覆盖（那是 Cursor 自己的报错，不该由插件掩盖）。面板的三个选项：
+
+| 选项 | 行为 |
+| --- | --- |
+| 不加 Cursor 署名（默认） | 把两项都写成 `false` |
+| 保留 Cursor 署名 | 把两项都写成 `true` |
+| 跟随 Cursor 自己的配置 | 插件不碰这个文件，你用自己的 Cursor 设置 |
+
+保存后立即写入，并在每次启动 CLI 前再确认一次——因为 CLI 只在进程启动时读一次配置，已经在跑的会话要等新会话才生效。选择器下面那行「Cursor 当前：…」显示的是配置文件的实际状态，不是你的选择：用了「跟随」或者写入失败时，两者会不一样。团队管理员在服务端禁用署名（`attributionControls`）时，本地怎么写都不会恢复署名。
 
 ### 开发与验证
 
@@ -220,7 +240,7 @@ See the [installation guide](docs/INSTALL.md) for detailed setup and troubleshoo
 3. Restart DSH when backend changes require it, then refresh the page. Open the Cursor panel under `/plugins/dsh-cursor-dev/`, select a model and save it. The history list keeps one row per run forever, so it sits in a height-capped scroll box and folds away when you click its heading (the choice is remembered); a row's **Delete** link clears that run's index record, journal and mirrored child — the same chain `resetSession` uses — and arms on the first click so the irreversible second click is deliberate.
 4. Ask the parent to use `cursor_code`, or send `/cursor-subagent` followed by a complete task. The command dispatches directly and hands a completion or failure summary back to the original parent.
 
-Version `0.12.3` explicitly declares support for DSH `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-rc.1` and `0.2.1-rc.2`, and pins the `@deepseek-ai/dsh` development dependency to exactly `0.2.1-rc.2`. Existing support for stable versions `>=0.2.1 <0.3.0` remains. Quota exhaustion protection is retained: before `cursor_code` or a native subagent call starts, the plugin reads Cursor usage and refuses the call, explaining why, when the total, Auto and API buckets are all at their limit, instead of dispatching a run that later fails mid-way. A usage lookup that cannot be completed never blocks a call. `cursor_subagent` also creates a clickable transcript child, so rows for running and finished runs open in the panel instead of reporting that no durable conversation exists. The panel keeps the four quota cards first, the proxy input above the model picker, and the model catalogue and source/egress notes folded. The dsh-market catalog already lists this plugin and updates its displayed version on subsequent probes. The public npm package is `dsh-cursor-dev`; its `latest` tag identifies the published version. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
+Version `0.12.3` explicitly declares support for DSH `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-rc.1` and `0.2.1-rc.2`, and pins the `@deepseek-ai/dsh` development dependency to exactly `0.2.1-rc.2`. Existing support for stable versions `>=0.2.1 <0.3.0` remains. Quota exhaustion protection is retained: before `cursor_code` or a native subagent call starts, the plugin reads Cursor usage and refuses the call, explaining why, when the total, Auto and API buckets are all at their limit, instead of dispatching a run that later fails mid-way. A usage lookup that cannot be completed never blocks a call. `cursor_subagent` also creates a clickable transcript child, so rows for running and finished runs open in the panel instead of reporting that no durable conversation exists. The dsh-market catalog already lists this plugin and updates its displayed version on subsequent probes. The public npm package is `dsh-cursor-dev`; its `latest` tag identifies the published version. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
 
 Requirements: DSH `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-rc.1`, `0.2.1-rc.2` or a stable version `>=0.2.1 <0.3.0` (verified against `0.2.1-rc.2`); Node.js `^22.19.0 || >=24.0.0`; an authenticated Cursor CLI account with service access. Native dispatch additionally needs DSH's `subagents` and `agents` services, and background runs need the host's job services. A current DSH desktop installation is recommended.
 
@@ -243,7 +263,7 @@ Cursor executes externally. From DSH 0.2.1 on, the host writes a single non-inte
 
 The parent remains responsible for reviewing the actual changes and verification evidence. File reports have scan limits and are not a substitute for final workspace checks. Cursor model availability and usage depend on the Cursor account; the parent model uses its separate DSH provider configuration.
 
-`maxChildDepth` (default `1`) caps who may start a Cursor child session. A top-level agent at depth `0` is the intended caller; a subagent at depth `1` that calls `cursor_code` or `cursor_subagent` is refused before any process, child session, or reset is created — `cursor_code` returns `sessionKey: "depth-refused"` and the error names both the current depth and the cap. This exists because the `cursor` provider declares `depthLimit: false` and cannot accept a numeric `maxDepth` from the host's `tool-subagent`, so the plugin enforces the limit itself. Set it to `0` to forbid Cursor children entirely, or higher to allow deeper nesting. The host's own delegation limit for `subagent` / `subagent_fork` (panel → Subagents → Run limits → maximum recursion depth) still applies independently. Opening a mirrored child conversation in the panel is a read-only record and is not affected.
+`maxChildDepth` (default `2`) caps who may start a Cursor child session. A top-level agent at depth `0` is the intended caller; a subagent at depth `1` that calls `cursor_code` or `cursor_subagent` is refused before any process, child session, or reset is created — `cursor_code` returns `sessionKey: "depth-refused"` and the error names both the current depth and the cap. This exists because the `cursor` provider declares `depthLimit: false` and cannot accept a numeric `maxDepth` from the host's `tool-subagent`, so the plugin enforces the limit itself. Set it to `0` to forbid Cursor children entirely, or `1` to keep delegation to the top-level agent only. The default of `2` lets a subagent start one too, because a Cursor run is a leaf — the CLI has no DSH tools, so it can never delegate further and every value above `2` behaves exactly like `2`. The settings panel's **Subagent depth** picker writes the same value and wins over this config; a change applies on the next call without reloading the plugin. The host's own delegation limit for `subagent` / `subagent_fork` (panel → Subagents → Run limits → maximum recursion depth) still applies independently. Opening a mirrored child conversation in the panel is a read-only record and is not affected.
 
 ### Proxy
 
@@ -258,6 +278,26 @@ The **子智能体模型** card carries a **proxy** box, empty by default.
 Why it exists: the Cursor CLI reads `HTTPS_PROXY` / `HTTP_PROXY` / `https_proxy` / `http_proxy` and nothing else — not the Windows registry, and not `ALL_PROXY`. On a machine whose only proxy lives in Internet Settings, the CLI child therefore reaches Cursor directly, and the direct route publishes only a fraction of the catalogue: measured on this machine, `agent --list-models` answers **31** models directly and **265** through the proxy, while the ACP roster the picker actually uses goes from **10** to **46**. That is the whole of the "some models are missing" symptom.
 
 Leaving the box empty already fixes it, so no configuration is normally needed: the plugin resolves the route, writes `HTTPS_PROXY`/`HTTP_PROXY` (and the lowercase spellings) into every child process it starts, and shows the result as **子进程出口** at the end of the *available models* line. Saving takes effect on the next spawn rather than the next restart, and a value that cannot be parsed is reported on that same line instead of being silently ignored.
+
+### Cursor attribution
+
+Cursor appends `Co-authored-by: Cursor` to the commits its agent makes, and credits itself on the pull requests it opens. Those commits land in repositories whose readers never agreed to that, so the panel turns it **off** by default: the **Cursor credit** picker at the bottom of the model card keeps the CLI's own settings file saying "no attribution", and the plugin applies that before the next CLI process starts.
+
+There is no flag and no environment variable for this — the only switch is Cursor's `cli-config.json`:
+
+```json
+{ "attribution": { "attributeCommitsToAgent": false, "attributePRsToAgent": false } }
+```
+
+The file lives where Cursor looks for it: `CURSOR_CONFIG_DIR`, else `XDG_CONFIG_HOME/cursor`, else `~/.cursor`. The plugin writes only those two keys — permissions, models, and auth information are preserved byte for byte — through a temporary file and a rename, and a file it cannot parse is left alone rather than replaced (that is Cursor's error to report). The three choices:
+
+| Choice | Effect |
+| --- | --- |
+| No Cursor credit (default) | writes both flags as `false` |
+| Credit Cursor | writes both flags as `true` |
+| Leave Cursor own setting alone | the plugin never touches the file |
+
+Saving applies immediately, and every spawn re-checks the file, because the CLI reads its configuration once at startup — a session already running keeps the old value until a new session starts. The `Cursor now:` line under the picker reports the state of the file, not your choice: with "leave alone" or after a failed write, the two differ. When a team administrator disables attribution server-side (`attributionControls`), no local setting turns it back on.
 
 ## License
 

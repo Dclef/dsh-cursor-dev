@@ -37,6 +37,7 @@ async function panel(t, quotaGuard) {
             get firstElementChild() { return this.children[0] || this.appendChild(element('i')); },
             setAttribute(name, value) { this.attributes[name] = String(value); },
             removeAttribute(name) { delete this.attributes[name]; },
+            get options() { return this.children; },
             appendChild(child) { this.children.push(child); return child; },
             addEventListener(name, callback) { this.listeners[name] = callback; },
         };
@@ -46,7 +47,7 @@ async function panel(t, quotaGuard) {
         querySelectorAll: () => [],
         createElement: element,
         getElementById(id) {
-            if (!nodes.has(id)) nodes.set(id, element(id === 'model' ? 'select' : 'div'));
+            if (!nodes.has(id)) nodes.set(id, element(id === 'model' || id === 'depth' || id === 'attribution' ? 'select' : 'div'));
             return nodes.get(id);
         },
     };
@@ -152,16 +153,25 @@ test('the four quota cards come first, then the model, then the sessions', async
         assert.match(overview, new RegExp(`id="${id}"`), `${id} lives in the overview`);
     }
     assert.equal((overview.match(/role="progressbar"/g) || []).length, 3);
-    // The picker, the lock and the proxy stay outside the folds; only the long
-    // catalogue and the diagnostic line fold away.
+    // The picker, the lock, the proxy and the depth cap stay outside the folds;
+    // only the long catalogue and the diagnostic line fold away.
     const model = section(html, 'modelcard');
     const firstFold = model.indexOf('<details');
-    for (const id of ['model', 'model-save', 'model-lock', 'model-status', 'proxy']) {
+    for (const id of ['model', 'model-save', 'model-lock', 'model-status', 'proxy', 'depth', 'attribution']) {
         const where = model.indexOf(`id="${id}"`);
         assert.ok(where > 0 && where < firstFold, `${id} is visible without unfolding anything`);
     }
-    assert.ok(model.indexOf('id="proxy"') < model.indexOf('<select id="model"'),
-        'the proxy sits above the picker: a wrong one is why the list looks short');
+    // The choice is the point of this card, so it comes before the machinery.
+    assert.ok(model.indexOf('<select id="model"') < model.indexOf('id="proxy"'),
+        'the picker sits above the proxy');
+    assert.ok(model.indexOf('id="model-status"') < model.indexOf('id="proxy"'),
+        'the proxy sits below the status line it explains');
+    assert.ok(model.indexOf('id="proxy"') < model.indexOf('<select id="depth"'),
+        'the depth cap follows the egress route');
+    assert.ok(model.indexOf('<select id="depth"') < model.indexOf('<select id="attribution"'),
+        'attribution follows the depth cap: both are about what the child may do');
+    assert.doesNotMatch(model, /id="model-advanced"/,
+        'the diagnostics fold is gone: its line lives in the catalogue fold');
     for (const id of ['model-reload', 'model-filter', 'model-list', 'model-state']) {
         assert.ok(model.indexOf(`id="${id}"`) > firstFold, `${id} sits in a fold`);
     }
