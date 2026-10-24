@@ -38,7 +38,7 @@ agent status --format json
 
 ## 2. 选择安装来源
 
-**当前源码版本：** `0.12.3`，显式声明支持 DSH `0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1` 和 `0.2.1-rc.2`，开发依赖 `@deepseek-ai/dsh` 精确固定为 `0.2.1-rc.2`，保留 `>=0.2.1 <0.3.0` 的稳定版本支持。同时保留额度耗尽保护（三个额度都到上限时提前拒绝，用量取不到时不拦截）、可点击的子会话轨迹，以及额度置顶、代理输入框在模型选择上方的面板布局。npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。插件市场已收录本插件，卡片版本随目录探测更新。
+**当前源码版本：** `0.12.4`，把两个原本要手改配置才能调的开关搬进了面板：`maxChildDepth` 默认值改为 `2`（Cursor 是叶节点，`2` 即实际上限），改为每次调用现读、面板「子代理深度」优先于配置；新增「Cursor 署名」开关，插件按你的选择写 Cursor 自己的 `cli-config.json`（只改 `attribution` 两项、其余键原样保留、解析不了的文件不覆盖），默认关闭。面板布局调整为模型选择器置顶、代理输入框在它所解释的状态行下方，「来源与出口」并入「模型目录、搜索与来源」。同时保留额度耗尽保护（三个额度都到上限时提前拒绝，用量取不到时不拦截）、可点击的子会话轨迹。DSH 兼容性不变，仍显式声明支持 `0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1`、`0.2.1-rc.2` 以及 `>=0.2.1 <0.3.0` 的稳定版本。npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。插件市场已收录本插件，卡片版本随目录探测更新。
 
 | 你要安装的内容 | 安装来源 |
 | --- | --- |
@@ -46,7 +46,7 @@ agent status --format json
 | npm 公共源上的已发布版本 | `dsh-cursor-dev`（`0.11.0` 起可用，按包内 `files` 白名单安装，版本以 npm 的 `latest` 标签为准） |
 | 公开仓库的当前版本（推荐） | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
 | 你本地的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
-| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.3.tgz` |
+| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.4.tgz` |
 
 表中本地路径是示例，需要换成实际位置。npm 来源取 registry 上发布的最新版本；Git 来源会取得仓库默认分支的最新提交；`.tgz` 是某一刻的固定快照——要跟进后续改动就用 Git 来源。
 
@@ -88,7 +88,7 @@ dsh plugin add "/home/you/plugins/dsh-cursor-dev"
 安装收到的包：
 
 ```powershell
-dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.3.tgz"
+dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.4.tgz"
 ```
 
 终端没有 `dsh` 命令时，使用桌面插件管理即可。不要把在任意项目目录执行 `npm install` 当成已经在 DSH 当前 profile 中启用插件。
