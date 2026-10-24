@@ -47,7 +47,19 @@ async function panel(t, quotaGuard) {
         querySelectorAll: () => [],
         createElement: element,
         getElementById(id) {
-            if (!nodes.has(id)) nodes.set(id, element(id === 'model' || id === 'depth' || id === 'attribution' ? 'select' : 'div'));
+            if (!nodes.has(id)) {
+                const node = element(id === 'model' || id === 'depth' || id === 'attribution' ? 'select' : 'div');
+                // The depth picker is static markup, not built by the script: seed the
+                // three choices its <select> carries, or a read-back would always be ''.
+                if (id === 'depth') {
+                    for (const value of ['', '1', '2']) {
+                        const option = element('option');
+                        option.value = value;
+                        node.children.push(option);
+                    }
+                }
+                nodes.set(id, node);
+            }
             return nodes.get(id);
         },
     };
@@ -86,6 +98,38 @@ async function panel(t, quotaGuard) {
     calls: function () { return calls; },
     render: render,
     lang: function (value) { LANG = value; applyLanguage(); },
+    // The depth cap is the one picker whose value the panel does *not* store on
+    // its own, so these three hooks are what a regression test needs: read or
+    // pick a value the way the <select> does, press 保存, and answer the POST.
+    depth: function (value) {
+      if (value === undefined) return $('depth').value;
+      $('depth').value = String(value);
+      var change = $('depth').listeners.change;
+      if (change) change();
+    },
+    save: function () { $('model-save').listeners.click(); },
+    reply: function (fn) { globalThis.fetch = fn; },
+    // The lock checkbox, the proxy box and the attribution switch are the same
+    // shape as the depth picker: read the painted value, make the change the
+    // browser would fire, and let a test repaint afterwards.
+    lock: function (value) {
+      if (value === undefined) return $('model-lock').checked;
+      $('model-lock').checked = value === true;
+      var change = $('model-lock').listeners.change;
+      if (change) change();
+    },
+    proxy: function (value) {
+      if (value === undefined) return $('proxy').value;
+      $('proxy').value = String(value);
+      var input = $('proxy').listeners.input;
+      if (input) input();
+    },
+    attribution: function (value) {
+      if (value === undefined) return $('attribution').value;
+      $('attribution').value = String(value);
+      var change = $('attribution').listeners.change;
+      if (change) change();
+    },
     keys: function () { return [Object.keys(T.zh), Object.keys(T.en)]; }
   };
   return;
@@ -335,4 +379,102 @@ test('a session key is elided for the column, never truncated to nothing', async
     assert.ok(short.includes('native-1f223'), 'and the label that tells rows apart survives');
     assert.equal(p.shortKey('short'), 'short', 'a key with no label part is left alone');
     assert.equal(p.shortKey('a::b'), 'a :: b', 'a short key is left readable');
+});
+
+test('a depth pick is kept on screen until 保存 writes it', async t => {
+    const p = await panel(t);
+    p.configure({}, MODELS);
+    assert.equal(p.depth(), '2', 'the config default is what the page opens with');
+    p.depth('1');
+    assert.equal(p.depth(), '1', 'the pick shows at once, without a save');
+
+    // The model card is repainted by unrelated clicks — a tab, a switch, a model
+    // pick. The depth pick has to survive all of them, or the panel looks like
+    // it refused the choice by itself.
+    p.configure({ model: 'default[]', modelPolicy: 'panel', disabledModels: [] }, MODELS);
+    assert.equal(p.depth(), '1');
+    assert.match(p.node('model-status').textContent, /有改动未保存/, 'the card says the pick is not saved yet');
+});
+
+test('saving a depth paints the value the server stored, not the one from page load', async t => {
+    const p = await panel(t);
+    p.configure({}, MODELS);
+    assert.equal(p.depth(), '2');
+    p.depth('1');
+    p.reply(async () => ({ json: async () => ({
+        ok: true,
+        settings: { model: 'default[]', modelPolicy: 'panel', maxChildDepth: 1, disabledModels: [] },
+        effectiveModel: 'default[]',
+        effectiveMaxChildDepth: 1,
+    }) }));
+    p.save();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(p.depth(), '1', 'the saved 1 sticks; a stale page-load value must not repaint over it');
+    assert.doesNotMatch(p.node('model-status').textContent, /有改动未保存/, 'nothing is left dirty after a save');
+});
+
+test('the lock, the proxy and the attribution pick survive an unrelated repaint', async t => {
+    const p = await panel(t);
+    p.configure({ model: '', modelPolicy: 'per-call', proxy: 'none', attribution: 'off' }, MODELS);
+    assert.equal(p.lock(), false, 'the saved policy is what the page opens with');
+    assert.equal(p.attribution(), 'off');
+
+    p.lock(true);
+    p.proxy('http://127.0.0.1:7890');
+    p.attribution('on');
+    assert.equal(p.lock(), true);
+    assert.equal(p.proxy(), 'http://127.0.0.1:7890');
+    assert.equal(p.attribution(), 'on', 'a picked attribution is not stored in settings either');
+
+    // The same repaint that used to snap the depth picker back: a tab click, a
+    // model pick, a refresh — anything that calls renderModel().
+    p.configure({ model: '', modelPolicy: 'per-call', proxy: 'none', attribution: 'off' }, MODELS);
+    assert.equal(p.lock(), true, 'the lock stays ticked');
+    assert.equal(p.proxy(), 'http://127.0.0.1:7890', 'the typed proxy stays in the box');
+    assert.equal(p.attribution(), 'on', 'the attribution pick stays put');
+    assert.match(p.node('model-status').textContent, /有改动未保存/, 'and the card says none of it is saved yet');
+});
+
+test('saving the card stores all four drafts, and a refused value keeps its 未保存 flag', async t => {
+    const p = await panel(t);
+    p.configure({ model: '', modelPolicy: 'per-call', proxy: 'none', attribution: 'off' }, MODELS);
+    p.depth('1');
+    p.lock(true);
+    p.proxy('http://127.0.0.1:7890');
+    p.attribution('on');
+    p.reply(async () => ({ json: async () => ({
+        ok: true,
+        settings: {
+            model: 'default[]', modelPolicy: 'panel', proxy: 'http://127.0.0.1:7890',
+            maxChildDepth: 1, attribution: 'on', disabledModels: [],
+        },
+        effectiveModel: 'default[]',
+        effectiveMaxChildDepth: 1,
+        attribution: { choice: 'on', attributeCommitsToAgent: true },
+    }) }));
+    p.save();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(p.depth(), '1');
+    assert.equal(p.lock(), true);
+    assert.equal(p.proxy(), 'http://127.0.0.1:7890');
+    assert.equal(p.attribution(), 'on');
+    assert.doesNotMatch(p.node('model-status').textContent, /有改动未保存/, 'the echoed values clear every draft');
+
+    // A value the write refuses is not echoed back: it must stay flagged rather
+    // than pretending the save landed.
+    p.proxy('http://127.0.0.1:8080');
+    p.reply(async () => ({ json: async () => ({
+        ok: true,
+        settings: {
+            model: 'default[]', modelPolicy: 'panel', proxy: 'http://127.0.0.1:7890',
+            maxChildDepth: 1, attribution: 'on', disabledModels: [],
+        },
+        effectiveModel: 'default[]',
+        effectiveMaxChildDepth: 1,
+        attribution: { choice: 'on', attributeCommitsToAgent: true },
+    }) }));
+    p.save();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(p.proxy(), 'http://127.0.0.1:8080', 'the refused text is still in the box');
+    assert.match(p.node('model-status').textContent, /有改动未保存/, 'and the card keeps saying it is unsaved');
 });
