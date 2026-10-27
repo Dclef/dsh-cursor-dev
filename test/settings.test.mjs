@@ -247,6 +247,9 @@ function cliDeps(dir, spawn, extra = {}) {
 test('modelsFor fetches the listing once, then serves it from the cache', async () => {
     await withDataDir(async (dir) => {
         const spawn = fakeSpawn({ stdout: LISTING });
+        // The CLI transport reads `--list-models` as its own source, so the cache
+        // rules under test are the ones that apply to it.
+        writeSettings(dir, { transport: 'cli' });
         const deps = cliDeps(dir, spawn);
 
         const cold = await modelsFor(dir, deps);
