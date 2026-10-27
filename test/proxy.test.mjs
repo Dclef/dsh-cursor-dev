@@ -38,6 +38,40 @@ test('a proxy becomes the variables the child CLI actually reads', () => {
     assert.equal(inherited.HTTPS_PROXY, 'http://env:1', 'the parent environment is unchanged');
 });
 
+test('the child environment keeps explicit Cursor settings without re-granting ambient credentials', () => {
+    const ambient = {
+        PATH: 'C:\\bin',
+        HOME: 'C:\\Users\\fixture',
+        DEEPSEEK_API_KEY: 'ambient-parent-key',
+        HOST_SECRET_TOKEN: 'ambient-parent-token',
+        lowercase_password: 'ambient-parent-password',
+        DSH_INTERNAL_SESSION: 'ambient-harness-fact',
+        dsh_lowercase_fact: 'ambient-harness-fact',
+        CURSOR_API_KEY: 'ambient-cursor-key',
+        CURSOR_CONFIG_DIR: 'C:\\fixture\\cursor',
+        HTTPS_PROXY: 'http://ambient-proxy:8080',
+    };
+    const direct = withProxyEnvironment(ambient, undefined);
+    assert.deepEqual(direct, {
+        PATH: 'C:\\bin',
+        HOME: 'C:\\Users\\fixture',
+        CURSOR_CONFIG_DIR: 'C:\\fixture\\cursor',
+    }, 'the service already scrubbed the ambient base; this full overlay must not undo that');
+
+    const explicit = withProxyEnvironment(ambient, { host: '127.0.0.1', port: 7890, scheme: 'http' });
+    assert.equal(explicit.DEEPSEEK_API_KEY, undefined);
+    assert.equal(explicit.CURSOR_API_KEY, undefined);
+    assert.equal(explicit.HOST_SECRET_TOKEN, undefined);
+    assert.equal(explicit.lowercase_password, undefined);
+    assert.equal(explicit.DSH_INTERNAL_SESSION, undefined);
+    assert.equal(explicit.dsh_lowercase_fact, undefined);
+    assert.equal(explicit.CURSOR_CONFIG_DIR, 'C:\\fixture\\cursor', 'native Cursor login/config discovery stays intact');
+    assert.equal(explicit.HTTPS_PROXY, 'http://127.0.0.1:7890');
+    assert.equal(explicit.https_proxy, 'http://127.0.0.1:7890');
+    assert.equal(explicit.PATH, ambient.PATH);
+    assert.equal(ambient.DEEPSEEK_API_KEY, 'ambient-parent-key', 'sanitizing does not mutate the parent');
+});
+
 test('the proxy setting says what it means, including "none"', async () => {
     assert.equal(proxySettingIsDirect('none'), true);
     assert.equal(proxySettingIsDirect(' DIRECT '), true);

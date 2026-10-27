@@ -446,3 +446,106 @@ test('native provider startup failure never publishes a holder or rejects its de
     assert.match(result.diagnostic, /startup failed/);
     await provider.dispose();
 });
+
+test('native results keep operational errors without copying credential-bearing product text', async () => {
+    const provider = createCursorProvider({
+        mirrors: {},
+        execute: async () => ({
+            ok: false,
+            sessionKey: 'fixture',
+            stopReason: 'error',
+            durationMs: 1,
+            error: 'cursor-acp: initialize failed: Authorization Bearer ambient-parent-token in C:\\private\\fixture',
+            steps: [],
+            changes: [],
+        }),
+    });
+    const run = await provider.start({ parent: { session: { header: { cwd: tmpdir() } } }, prompt: [{ type: 'text', text: 'task' }] });
+    const result = await run.result;
+    assert.equal(result.stopReason, 'error');
+    assert.match(result.diagnostic, /initialize failed/);
+    assert.match(result.diagnostic, /\[redacted\]/);
+    assert.doesNotMatch(result.diagnostic, /ambient-parent-token/);
+    assert.doesNotMatch(result.diagnostic, /Bearer /);
+    assert.doesNotMatch(result.output[0].text, /ambient-parent-token/);
+    await provider.dispose();
+});
+
+test('provider disposal during startup aborts acquisition and releases the exact late mirror', async t => {
+    const cwd = await mkdtemp(join(tmpdir(), 'cursor-native-startup-'));
+    t.after(() => rm(cwd, { recursive: true, force: true }));
+    const opening = deferred();
+    const acquired = deferred();
+    const started = deferred();
+    const releases = [];
+    let signal;
+    let disposeAndWaitCalls = 0;
+    let announceCalls = 0;
+    const provider = createCursorProvider({
+        mirrors: { async release(key, options) { releases.push({ key, entry: options.entry }); } },
+        execute: async (_args, exec) => {
+            signal = exec.signal;
+            started.resolve();
+            await opening.promise;
+            exec.cursorLifecycle.opened({ child: { id: 'late-child',
+                session: { header: { id: 'late-child', createdAt: 1 } } } }, 'late-key');
+            await acquired.promise;
+            exec.cursorLifecycle.acquired({ async disposeAndWait() { disposeAndWaitCalls += 1; } });
+            return { ok: false, sessionKey: 'late-key', stopReason: 'error', durationMs: 0, steps: [], changes: [] };
+        },
+    });
+    const parent = { id: 'parent', session: {
+        header: { id: 'parent', cwd },
+        snapshotEvents: () => [],
+        append() { announceCalls += 1; },
+    } };
+    const starting = provider.start({ parent, prompt: [{ type: 'text', text: 'task' }], cursor: { args: { task: 'task' } } });
+    // Wait until the run has actually been admitted and is inside `execute`:
+    // `start()` inspects the workspace before it creates the abort controller,
+    // so disposing a few microtasks earlier would test admission, not startup
+    // cancellation.
+    await started.promise;
+    const disposal = provider.dispose();
+    assert.equal(signal.aborted, true, 'unload cancels work already past admission');
+    opening.resolve();
+    acquired.resolve();
+    await assert.rejects(starting, /aborted|unloading/);
+    await disposal;
+    assert.equal(disposeAndWaitCalls, 1, 'a late process lease is reaped even when execution settled first');
+    assert.equal(releases.length, 1);
+    assert.equal(releases[0].key, 'late-key');
+    assert.equal(releases[0].entry.child.id, 'late-child');
+    assert.equal(announceCalls, 0, 'a cancelled unpublished run never reaches the parent catalog');
+});
+
+test('announcement failure preserves the original report and still performs every cleanup step', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'cursor-native-announce-'));
+    try {
+        const releases = [];
+        let disposed = 0;
+        const child = { id: 'mirror', session: { header: { id: 'mirror', createdAt: 1 } } };
+        const provider = createCursorProvider({
+            mirrors: { async release(key) { releases.push(key); } },
+            execute: async (_args, exec) => {
+                exec.cursorLifecycle.acquired({ async disposeAndWait() { disposed += 1; } });
+                exec.cursorLifecycle.opened({ child }, 'key');
+                return { ok: true, sessionKey: 'key', stopReason: 'end_turn', durationMs: 0, steps: [], changes: [] };
+            },
+        });
+        const parent = { session: { header: { cwd }, snapshotEvents: () => [],
+            append() { throw new Error('fixture catalog unavailable'); } } };
+        // No pre-aborted signal here: `start()` checks the caller's signal at
+        // admission, so aborting first would reject before the announcement is
+        // ever attempted and test nothing about announcement failure.
+        await assert.rejects(
+            provider.start({ parent, prompt: [{ type: 'text', text: 'task' }], cursor: { args: { task: 'task' } } }),
+            /catalog unavailable/,
+        );
+        assert.equal(disposed, 1);
+        assert.deepEqual(releases, ['key']);
+        await provider.dispose();
+    }
+    finally {
+        await rm(cwd, { recursive: true, force: true });
+    }
+});
