@@ -400,6 +400,8 @@ test('the settings API reports the state the panel needs to render', async () =>
             // Nothing saved: the panel shows the config default instead.
             maxChildDepth: '',
             attribution: 'off',
+            // Nothing says otherwise, so the panel renders the ACP transport.
+            transport: 'acp',
             disabledModels: [],
             updatedAt: json.settings.updatedAt,
         });
