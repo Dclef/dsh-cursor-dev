@@ -53,7 +53,13 @@ test('normalizeModelId maps every way of saying "the default" to the id ACP spea
 });
 
 test('cliModelArg keeps the spawn flag to the alias the CLI itself lists', () => {
-    assert.equal(cliModelArg('composer-2.5[fast=true]'), 'composer-2.5', 'the bracket suffix is not a CLI option');
+    // The bracket spelling is not a CLI option, but the tier inside it IS what
+    // the process is billed for, so it is carried into the alias rather than
+    // dropped: `composer-2.5[fast=true]` and `composer-2.5-fast` are one model.
+    assert.equal(cliModelArg('composer-2.5[fast=true]'), 'composer-2.5-fast');
+    assert.equal(cliModelArg('grok-4.7[context=256k,reasoning_effort=high,fast=true]'), 'grok-4.7-high-fast');
+    assert.equal(cliModelArg('kimi-k3[reasoning=max]'), 'kimi-k3-max');
+    assert.equal(cliModelArg('deepseek-v41-flash-1017[reasoning_effort=high]'), 'deepseek-v41-flash-1017-high');
     assert.equal(cliModelArg('auto'), '');
     assert.equal(cliModelArg('default[]'), '', 'the protocol-only default alias is not a CLI model');
     assert.equal(cliModelArg('  glm-5.2-high '), 'glm-5.2-high');
@@ -264,9 +270,12 @@ test('acpArgv keeps each name space on the side of the boundary it belongs to', 
     }
 
     // A parameterised id is what the ACP method takes, not what the CLI flag
-    // takes — the flag gets the alias, or the CLI refuses to start at all.
+    // takes — the flag gets the alias, or the CLI refuses to start at all. The
+    // tier travels with it: the process is billed for the tier it was started
+    // with, so `grok-4.7[...high,fast=true]` must not become a bare
+    // `grok-4.7`, which would run the account default instead.
     const pinned = acpArgv(resolved, 'composer-2.5[fast=true]');
-    assert.equal(pinned[pinned.indexOf('--model') + 1], 'composer-2.5');
+    assert.equal(pinned[pinned.indexOf('--model') + 1], 'composer-2.5-fast');
     assert.equal(pinned[pinned.length - 1], 'acp');
 
     // An alias passes through untouched, and the entry still leads the argv.

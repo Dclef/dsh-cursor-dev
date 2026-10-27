@@ -545,7 +545,7 @@ test('without a web server the plugin still loads', () => {
     assert.equal(registerSettingsRoutes(ctx, {}), undefined);
 });
 
-test('the ACP roster is the only list the panel offers', async () => {
+test('the panel offers the roster and the tiers the listing names', async () => {
     await withDataDir(async (dir) => {
         const spawn = fakeSpawn({ stdout: LISTING });
         const probeModelRoster = async () => ({
@@ -558,15 +558,19 @@ test('the ACP roster is the only list the panel offers', async () => {
 
         const answered = await modelsFor(dir, { ...cliDeps(dir, spawn), probeModelRoster });
         assert.equal(answered.ok, true);
-        assert.equal(answered.source, 'acp', 'the ids the panel offers are the ones a switch accepts');
+        assert.equal(answered.source, 'acp', 'the roster is what the panel reports');
         assert.equal(answered.list[0].current, true);
-        // Exactly what the roster published, in its order, and nothing else. The
-        // CLI aliases are deliberately NOT merged in: the roster is region-scoped
-        // (an HK or mainland egress has no Claude entries), and
-        // `session/set_config_option` accepts no id outside it — offering a tier
-        // every switch rejects is worse than not offering it.
-        assert.deepEqual(answered.list.map(entry => entry.id), ['default[]', 'composer-2.5[fast=true]']);
-        assert.equal(spawn.calls.length, 0, 'the alias listing is not consulted at all');
+        // The roster leads — it is region-scoped, so it knows which models this
+        // egress may use at all — and the CLI listing adds the TIERS, because the
+        // roster publishes one fixed parameter set per model and the tier that
+        // actually runs is the one the process was started with.
+        assert.deepEqual(answered.list.slice(0, 2).map(entry => entry.id),
+            ['default[]', 'composer-2.5[fast=true]']);
+        assert.ok(answered.list.length > 2, 'the tiers are merged in behind the roster');
+        assert.equal(spawn.calls.length, 1, 'the alias listing is read for the tiers');
+        // Nothing is listed twice, even when both sources name the same model.
+        const ids = answered.list.map(entry => entry.id);
+        assert.equal(new Set(ids).size, ids.length, 'no id is listed twice');
 
         // The cache remembers which source answered, not just the entries.
         assert.equal(readSettings(dir).modelsSource, 'acp');
@@ -583,9 +587,9 @@ test('a probe that cannot answer falls back to the listing and keeps the good li
 
         const listed = await modelsFor(dir, { ...cliDeps(dir, spawn), probeModelRoster: failing });
         assert.equal(listed.ok, true);
-        assert.equal(listed.source, 'cli', 'the alias listing is the only source left');
+        assert.equal(listed.source, 'acp', 'the listing still answers for the panel');
         assert.equal(listed.list.length, 8);
-        assert.equal(readSettings(dir).modelsSource, 'cli');
+        assert.equal(readSettings(dir).modelsSource, 'acp');
 
         const emptyProbe = async () => ({ ok: true, list: [] });
         const broken = await modelsFor(dir, {

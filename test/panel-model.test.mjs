@@ -175,12 +175,15 @@ test('switching a family row off hides all of its tiers at once', async t => {
     const box = row.children[1];
     box.checked = false;
     box.listeners.change();
-    // Both aliases of the family are denied, so the row keeps meaning "this
-    // model is off" rather than flickering per tier.
+    // The switch is on the MODEL, not on one spelling of it: the deny list holds
+    // one entry per family, and every alias of that family is matched by it.
+    // Two id spellings of one model would otherwise sit in the file and hide
+    // each other from the other spelling's list.
     ui.nodes.get('model-save').listeners.click();
     await new Promise(resolve => setImmediate(resolve));
     const saved = JSON.parse(ui.requests[0].options.body).disabledModels;
-    assert.deepEqual(saved.sort(), ['deepseek-v41-flash-1017-high', 'deepseek-v41-flash-1017-max']);
+    assert.deepEqual(saved, ['deepseek-v41-flash-1017-high'],
+        'one entry per family, not one per alias');
 });
 
 test('the panel saves Auto and the lock together', async t => {
@@ -191,10 +194,10 @@ test('the panel saves Auto and the lock together', async t => {
     ui.nodes.get('model-save').listeners.click();
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(JSON.parse(ui.requests[0].options.body), {
-        // The depth and transport pickers travel with the same save: one click
-        // must not leave a control the card shows unsaved.
+        // The depth picker travels with the same save: one click must not
+        // leave a control the card shows unsaved.
         model: 'default[]', modelPolicy: 'panel', proxy: '', maxChildDepth: 2,
-        attribution: 'off', transport: 'acp', disabledModels: [],
+        attribution: 'off', disabledModels: [],
     });
     assert.match(ui.nodes.get('model-state').textContent, /已锁定模型/);
 });

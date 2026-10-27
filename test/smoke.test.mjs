@@ -119,8 +119,8 @@ test('the Cursor CLI is discoverable and its argv is well formed', () => {
         'the protocol-only default alias is not a CLI flag either');
     const pinned = acpArgv(agent, 'composer-2.5[fast=true]');
     assert.equal(pinned[pinned.length - 1], 'acp', 'acp must stay last');
-    assert.equal(pinned[pinned.indexOf('--model') + 1], 'composer-2.5',
-        'the spawn flag takes the bare alias the CLI lists, not the parameterised id');
+    assert.equal(pinned[pinned.indexOf('--model') + 1], 'composer-2.5-fast',
+        'the spawn flag takes the alias the CLI lists, tier included, not the parameterised id');
 });
 
 test('data dir honours the environment override', () => {
