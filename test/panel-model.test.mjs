@@ -143,6 +143,46 @@ test('a single-tier model shows one inert option instead of an empty control', a
     assert.equal(ui.nodes.get('model-tier').children.length, 1);
 });
 
+test('the browser lists one row per model, not one per tier', async t => {
+    const ui = await panel(t);
+    ui.configure({ model: 'deepseek-v41-flash-1017-high', modelPolicy: 'panel' }, [
+        { id: 'default[]', name: 'Auto' },
+        { id: 'deepseek-v41-flash-1017-none', name: 'DeepSeek V4.1 Flash 1017 None' },
+        { id: 'deepseek-v41-flash-1017-low', name: 'DeepSeek V4.1 Flash 1017 Low' },
+        { id: 'deepseek-v41-flash-1017-medium', name: 'DeepSeek V4.1 Flash 1017 Medium' },
+        { id: 'deepseek-v41-flash-1017-high', name: 'DeepSeek V4.1 Flash 1017 High' },
+        { id: 'deepseek-v41-flash-1017-max', name: 'DeepSeek V4.1 Flash 1017 Max' },
+    ]);
+    ui.renderModel();
+    const rows = ui.nodes.get('model-list').children;
+    // Auto plus one DeepSeek row: the five aliases collapse, so an operator
+    // scrolls nine families instead of thirty-six lookalike entries.
+    assert.equal(rows.length, 2, 'one row per family');
+    assert.ok(rows.some(row => row.children[0].textContent === 'Auto'), 'the routing choice keeps its own row');
+    assert.ok(rows.some(row => row.children[0].textContent.indexOf('DeepSeek V4.1 Flash 1017') === 0),
+        'the family name carries no tier suffix');
+});
+
+test('switching a family row off hides all of its tiers at once', async t => {
+    const ui = await panel(t);
+    ui.configure({ model: '', modelPolicy: 'per-call', disabledModels: [] }, [
+        { id: 'deepseek-v41-flash-1017-high', name: 'DeepSeek High' },
+        { id: 'deepseek-v41-flash-1017-max', name: 'DeepSeek Max' },
+        { id: 'composer-2.5', name: 'Composer 2.5' },
+    ]);
+    ui.renderModel();
+    const row = ui.nodes.get('model-list').children.filter(entry => entry.children[0].textContent.indexOf('DeepSeek') !== -1)[0];
+    const box = row.children[1];
+    box.checked = false;
+    box.listeners.change();
+    // Both aliases of the family are denied, so the row keeps meaning "this
+    // model is off" rather than flickering per tier.
+    ui.nodes.get('model-save').listeners.click();
+    await new Promise(resolve => setImmediate(resolve));
+    const saved = JSON.parse(ui.requests[0].options.body).disabledModels;
+    assert.deepEqual(saved.sort(), ['deepseek-v41-flash-1017-high', 'deepseek-v41-flash-1017-max']);
+});
+
 test('the panel saves Auto and the lock together', async t => {
     const ui = await panel(t);
     ui.configure({ model: 'auto' }, [{ id: 'default[]', name: 'Auto' }]);
