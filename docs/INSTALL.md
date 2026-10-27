@@ -38,7 +38,7 @@ agent status --format json
 
 ## 2. 选择安装来源
 
-**当前源码版本：** `0.12.5`，修掉模型卡片上「选了又被自己打回原样」的问题：子代理深度、锁定面板模型、代理输入框、Cursor 署名四个控件以前只在点「保存」时从页面读值，任何一次重绘（点标签页、拨模型开关、选模型、点刷新）都会按存档值重画，于是刚选的值会自己弹回去；现在四者各自保留未保存的草稿，重绘以草稿为准，保存成功且服务端回显同一个值才清草稿，被拒的值留在控件里继续标「有改动未保存」，保存成功也不再无条件写「已保存」。DSH 兼容性方面，开发依赖 `@deepseek-ai/dsh` 更新为 `0.2.1-rc.3`，显式支持列表加入 `0.2.1-rc.3`，`>=0.2.1-rc.2 <0.3.0-0` 与稳定版本 `>=0.2.1 <0.3.0` 的支持不变。同时保留额度耗尽保护（三个额度都到上限时提前拒绝，用量取不到时不拦截）、可点击的子会话轨迹。npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。插件市场已收录本插件，卡片版本随目录探测更新。
+**当前源码版本：** `0.12.6`，收紧原生子智能体的边界，共修掉五处：`cursor_subagent` 失败时的诊断先做脱敏再回父会话，`Bearer`/`Basic` 令牌、`sk-`/`ghp_` 这类密钥、`api_key=`/`token=`/`password=` 形式的赋值和整段绝对路径都会被替换，但失败原因（如 `initialize failed`、`ENOENT`）保留，仍可据此排查；运行在启动阶段被取消时不再向目录公告一个调用方从未收到的子会话，卸载时也就不会在面板里留下这一行；公告失败时保留原始错误，清理阶段的失败改为附带而非覆盖它；放弃的运行也会回收已拿到的进程租约，不再让迟到进程活过调用方已放弃的那次调用；启动 Cursor 子进程前会先清掉继承到的凭据形态变量和 `DSH_`/`DEEPSEEK_` 内部变量，`CURSOR_CONFIG_DIR`、`CURSOR_HOME`、`XDG_CONFIG_HOME` 保留以维持 Cursor 自身登录发现。DSH 兼容性不变，开发依赖 `@deepseek-ai/dsh` 仍为 `0.2.1-rc.3`，`>=0.2.1-rc.2 <0.3.0-0` 与稳定版本 `>=0.2.1 <0.3.0` 的支持不变。同时保留额度耗尽保护（三个额度都到上限时提前拒绝，用量取不到时不拦截）、可点击的子会话轨迹，以及面板的四项草稿保留。npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。插件市场已收录本插件，卡片版本随目录探测更新。
 
 | 你要安装的内容 | 安装来源 |
 | --- | --- |
@@ -46,7 +46,7 @@ agent status --format json
 | npm 公共源上的已发布版本 | `dsh-cursor-dev`（`0.11.0` 起可用，按包内 `files` 白名单安装，版本以 npm 的 `latest` 标签为准） |
 | 公开仓库的当前版本（推荐） | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
 | 你本地的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
-| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.5.tgz` |
+| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.6.tgz` |
 
 表中本地路径是示例，需要换成实际位置。npm 来源取 registry 上发布的最新版本；Git 来源会取得仓库默认分支的最新提交；`.tgz` 是某一刻的固定快照——要跟进后续改动就用 Git 来源。
 
@@ -88,7 +88,7 @@ dsh plugin add "/home/you/plugins/dsh-cursor-dev"
 安装收到的包：
 
 ```powershell
-dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.5.tgz"
+dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.6.tgz"
 ```
 
 终端没有 `dsh` 命令时，使用桌面插件管理即可。不要把在任意项目目录执行 `npm install` 当成已经在 DSH 当前 profile 中启用插件。
