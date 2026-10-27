@@ -48,7 +48,7 @@ async function panel(t, quotaGuard) {
         createElement: element,
         getElementById(id) {
             if (!nodes.has(id)) {
-                const node = element(id === 'model' || id === 'depth' || id === 'attribution' ? 'select' : 'div');
+                const node = element(id === 'model' || id === 'model-family' || id === 'model-tier' || id === 'depth' || id === 'attribution' ? 'select' : 'div');
                 // The depth picker is static markup, not built by the script: seed the
                 // three choices its <select> carries, or a read-back would always be ''.
                 if (id === 'depth') {
@@ -75,7 +75,20 @@ async function panel(t, quotaGuard) {
   globalThis.panelTest = {
     renderModel: renderModel, shortKey: shortKey,
     filter: function () { return $('model-filter'); },
-    options: function () { return $('model').children; },
+    options: function () { return $('model-family').children; },
+    tiers: function () { return $('model-tier').children; },
+    pick: function (id) {
+      // Driving the family picker is how an operator narrows to one model; the
+      // tier picker then offers that family's tiers.
+      $('model-family').value = id;
+      var change = $('model-family').listeners.change;
+      if (change) change();
+    },
+    tier: function (id) {
+      $('model-tier').value = id;
+      var change = $('model-tier').listeners.change;
+      if (change) change();
+    },
     rows: function () { return $('model-list').children; },
     type: function (value) { $('model-filter').value = value; $('model-filter').listeners.input(); },
     configure: function (value, list) {
@@ -201,13 +214,15 @@ test('the four quota cards come first, then the model, then the sessions', async
     // only the long catalogue and the diagnostic line fold away.
     const model = section(html, 'modelcard');
     const firstFold = model.indexOf('<details');
-    for (const id of ['model', 'model-save', 'model-lock', 'model-status', 'proxy', 'depth', 'attribution']) {
+    for (const id of ['model-family', 'model-tier', 'model-save', 'model-lock', 'model-status', 'proxy', 'depth', 'attribution']) {
         const where = model.indexOf(`id="${id}"`);
         assert.ok(where > 0 && where < firstFold, `${id} is visible without unfolding anything`);
     }
     // The choice is the point of this card, so it comes before the machinery.
-    assert.ok(model.indexOf('<select id="model"') < model.indexOf('id="proxy"'),
+    assert.ok(model.indexOf('<select id="model-family"') < model.indexOf('id="proxy"'),
         'the picker sits above the proxy');
+    assert.ok(model.indexOf('<select id="model-family"') < model.indexOf('<select id="model-tier"'),
+        'the model comes before the tier that narrows it');
     assert.ok(model.indexOf('id="model-status"') < model.indexOf('id="proxy"'),
         'the proxy sits below the status line it explains');
     assert.ok(model.indexOf('id="proxy"') < model.indexOf('<select id="depth"'),
@@ -220,7 +235,8 @@ test('the four quota cards come first, then the model, then the sessions', async
         assert.ok(model.indexOf(`id="${id}"`) > firstFold, `${id} sits in a fold`);
     }
     assert.doesNotMatch(model, /<details[^>]* open/, 'the folds start closed');
-    assert.match(model, /<select id="model" aria-labelledby="model-title">/);
+    assert.match(model, /<select id="model-family" aria-labelledby="model-title"/);
+    assert.match(model, /<select id="model-tier" aria-labelledby="model-title"/);
     assert.match(model, /<label[^>]* for="proxy"/);
 });
 

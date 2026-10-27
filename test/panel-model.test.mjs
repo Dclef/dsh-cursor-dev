@@ -38,7 +38,7 @@ async function panel(t) {
     const document = {
         createElement: element,
         getElementById(id) {
-            if (!nodes.has(id)) nodes.set(id, element(id === 'model' || id === 'depth' || id === 'attribution' ? 'select' : 'div'));
+            if (!nodes.has(id)) nodes.set(id, element(id === 'model-family' || id === 'model-tier' || id === 'depth' || id === 'attribution' ? 'select' : 'div'));
             return nodes.get(id);
         },
     };
@@ -76,14 +76,71 @@ test('the panel treats auto and default[] as one model and distinguishes saved f
     ui.renderModel();
     assert.equal(ui.modelCell('default[]'), 'Auto', 'already on Auto must not show a pending switch');
     assert.match(ui.modelCell('composer-2.5[fast=true]'), /下次调用切换/);
-    const options = ui.nodes.get('model').children;
+    const options = ui.nodes.get('model-family').children;
+    // The family picker collapses tiers: two Auto aliases are ONE routing
+    // choice, and composer-2.5 is one family regardless of its fast tier.
     assert.equal(options.filter(option => option.value === 'default[]').length, 1);
     assert.match(options.find(option => option.value === 'default[]').textContent, /已保存选择/);
     assert.doesNotMatch(options.find(option => option.value === 'default[]').textContent, /最近读取时使用/);
-    assert.match(options.find(option => option.value.startsWith('composer')).textContent, /最近读取时使用/);
-    assert.equal(ui.nodes.get('model').value, 'default[]');
+    assert.equal(ui.nodes.get('model-family').value, 'default[]');
     ui.configure({ model: 'auto', modelPolicy: 'per-call' });
     assert.match(ui.modelCell('composer-2.5[fast=true]'), /未被调用参数覆盖时使用/);
+});
+
+test('one model family offers its tiers as a second dropdown', async t => {
+    const ui = await panel(t);
+    ui.configure({ model: 'deepseek-v41-flash-1017-high', modelPolicy: 'panel' }, [
+        { id: 'deepseek-v41-flash-1017-none', name: 'DeepSeek V4.1 Flash 1017 None' },
+        { id: 'deepseek-v41-flash-1017-low', name: 'DeepSeek V4.1 Flash 1017 Low' },
+        { id: 'deepseek-v41-flash-1017-medium', name: 'DeepSeek V4.1 Flash 1017 Medium' },
+        { id: 'deepseek-v41-flash-1017-high', name: 'DeepSeek V4.1 Flash 1017 High' },
+        { id: 'deepseek-v41-flash-1017-max', name: 'DeepSeek V4.1 Flash 1017 Max' },
+        { id: 'composer-2.5-fast', name: 'Composer 2.5 Fast' },
+    ]);
+    ui.renderModel();
+    // Five lookalike aliases collapse to ONE model row: the tier is the axis
+    // that differs, and it belongs in its own dropdown.
+    const families = ui.nodes.get('model-family').children.filter(o => o.value !== '');
+    assert.equal(families.length, 2, 'deepseek + composer, not six aliases');
+    assert.ok(families.some(o => o.value === 'deepseek-v41-flash-1017-none'), 'the family row carries one alias');
+    // The tier dropdown lists every tier of the selected family, plus `max`.
+    const tiers = ui.nodes.get('model-tier').children;
+    assert.deepEqual(tiers.map(o => o.value), [
+        'deepseek-v41-flash-1017-none',
+        'deepseek-v41-flash-1017-low',
+        'deepseek-v41-flash-1017-medium',
+        'deepseek-v41-flash-1017-high',
+        'deepseek-v41-flash-1017-max',
+    ]);
+    assert.equal(ui.nodes.get('model-tier').value, 'deepseek-v41-flash-1017-high', 'the saved tier is selected');
+    assert.equal(ui.nodes.get('model-tier').disabled, false);
+});
+
+test('picking a tier saves the full alias it stands for', async t => {
+    const ui = await panel(t);
+    ui.configure({ model: 'deepseek-v41-flash-1017-high', modelPolicy: 'panel' }, [
+        { id: 'deepseek-v41-flash-1017-high', name: 'DeepSeek High' },
+        { id: 'deepseek-v41-flash-1017-max', name: 'DeepSeek Max' },
+    ]);
+    ui.renderModel();
+    ui.nodes.get('model-tier').value = 'deepseek-v41-flash-1017-max';
+    ui.nodes.get('model-tier').listeners.change();
+    ui.nodes.get('model-save').listeners.click();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(JSON.parse(ui.requests[0].options.body).model, 'deepseek-v41-flash-1017-max');
+});
+
+test('a single-tier model shows one inert option instead of an empty control', async t => {
+    const ui = await panel(t);
+    ui.configure({ model: 'kimi-k2.7-code', modelPolicy: 'panel' }, [
+        { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code' },
+    ]);
+    ui.renderModel();
+    // One tier is still one tier: the dropdown shows that alias and locks itself
+    // shut, so the operator cannot pick a tier that does not exist.
+    assert.equal(ui.nodes.get('model-tier').disabled, true);
+    assert.equal(ui.nodes.get('model-tier').value, 'kimi-k2.7-code');
+    assert.equal(ui.nodes.get('model-tier').children.length, 1);
 });
 
 test('the panel saves Auto and the lock together', async t => {
