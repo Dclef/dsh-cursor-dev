@@ -540,7 +540,7 @@ test('without a web server the plugin still loads', () => {
     assert.equal(registerSettingsRoutes(ctx, {}), undefined);
 });
 
-test('the ACP roster is preferred over the CLI listing, and the source is reported', async () => {
+test('the ACP roster is the only list the panel offers', async () => {
     await withDataDir(async (dir) => {
         const spawn = fakeSpawn({ stdout: LISTING });
         const probeModelRoster = async () => ({
@@ -555,18 +555,13 @@ test('the ACP roster is preferred over the CLI listing, and the source is report
         assert.equal(answered.ok, true);
         assert.equal(answered.source, 'acp', 'the ids the panel offers are the ones a switch accepts');
         assert.equal(answered.list[0].current, true);
-        // The roster decides what the switch accepts, so its entries lead and
-        // carry their own source. The CLI listing is still asked for — it is the
-        // only place the per-tier aliases exist — and fills the gaps behind it.
-        assert.deepEqual(answered.list.slice(0, 2).map(entry => entry.id), ['default[]', 'composer-2.5[fast=true]']);
-        assert.equal(answered.list[0].source, 'acp');
-        assert.equal(answered.list[1].source, 'acp');
-        assert.equal(spawn.calls.length, 1, 'the alias listing is read for the tiers the roster omits');
-        assert.ok(answered.list.length > 2, 'the roster is widened by the aliases, not replaced');
-        // Anything the roster already published is not duplicated under the
-        // alias spelling; a gap is filled exactly once.
-        const ids = answered.list.map(entry => entry.id);
-        assert.equal(new Set(ids).size, ids.length, 'no id is listed twice');
+        // Exactly what the roster published, in its order, and nothing else. The
+        // CLI aliases are deliberately NOT merged in: the roster is region-scoped
+        // (an HK or mainland egress has no Claude entries), and
+        // `session/set_config_option` accepts no id outside it — offering a tier
+        // every switch rejects is worse than not offering it.
+        assert.deepEqual(answered.list.map(entry => entry.id), ['default[]', 'composer-2.5[fast=true]']);
+        assert.equal(spawn.calls.length, 0, 'the alias listing is not consulted at all');
 
         // The cache remembers which source answered, not just the entries.
         assert.equal(readSettings(dir).modelsSource, 'acp');
