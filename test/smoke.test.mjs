@@ -1105,7 +1105,8 @@ test('a missing Cursor CLI degrades the tool instead of failing the mount', asyn
     const settingsBody = JSON.parse(settingsChunks.join(''));
     assert.equal(settingsBody.models.ok, false);
     assert.match(settingsBody.models.error, /Cursor CLI is not available/);
-    assert.equal(settingsBody.effectiveModel, '');
+    // Auto is the default choice, so the panel says so even with no CLI.
+    assert.equal(settingsBody.effectiveModel, 'default[]');
 
     // The status route must answer rather than throw on a missing agent, and it
     // must say *which* step of the setup is missing — that is what turns a panel

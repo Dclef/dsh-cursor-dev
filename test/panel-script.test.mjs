@@ -53,3 +53,21 @@ test('the served panel script keeps its whitespace class in the tier regex', asy
     assert.ok(!new RegExp(`[${match[1].replace('\\s', '')}]`).test(' '),
         'without the backslash the class would match "s" and "-" only');
 });
+
+test('no comment inside the panel script carries a backtick', async t => {
+    const script = await servedScript(t);
+    // The panel script is emitted through a template literal, so a backtick in a
+    // COMMENT closes the template early: the source still parses as this module,
+    // but the page the browser receives is truncated at that point. The served
+    // artifact is the only place the damage is visible, so it is checked here.
+    const offenders = [];
+    script.split('\n').forEach((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('/*'))
+            return;
+        if (trimmed.includes('`'))
+            offenders.push(`${index + 1}: ${trimmed.slice(0, 70)}`);
+    });
+    assert.deepEqual(offenders, [],
+        'a backtick in a panel comment truncates the served script');
+});

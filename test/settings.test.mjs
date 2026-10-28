@@ -155,8 +155,10 @@ test('writeSettings merges, and never leaves a half-written file behind', async 
 test('the panel choice beats the profile config, and an empty choice is not a choice', () => {
     assert.equal(effectiveModel({ model: 'grok-4.7-high' }, 'composer-2.5'), 'grok-4.7-high');
     assert.equal(effectiveModel({ model: '' }, 'composer-2.5'), 'composer-2.5', 'the profile config is the machine default');
-    assert.equal(effectiveModel(emptySettings(), 'composer-2.5'), 'composer-2.5');
-    assert.equal(effectiveModel(emptySettings(), undefined), '', 'empty means "let the CLI decide"');
+    // A fresh install runs Auto: the account picks the model, so nothing has to
+    // be decided here.
+    assert.equal(effectiveModel(emptySettings(), 'composer-2.5'), 'default[]');
+    assert.equal(effectiveModel(emptySettings(), undefined), 'default[]', 'Auto is the default choice');
     assert.equal(effectiveModel(undefined, undefined), '');
 });
 

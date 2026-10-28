@@ -55,7 +55,16 @@ async function panel(t) {
     const executable = source.replace('\n  applyLanguage();\n', `
   globalThis.panelTest = {
     renderModel: renderModel, modelCell: modelCell,
-    configure: function(value, list) { settings = value; models = list || []; },
+    configure: function(value, list) {
+      settings = value;
+      models = list || [];
+      // The transport decides whether the tiers are reachable, so the picker
+      // follows it the way a settings payload makes it follow.
+      if (typeof value.transport === 'string') {
+        transportChoice = value.transport === 'cli' ? 'cli' : 'acp';
+      }
+      renderModel();
+    },
     setProxy: function(value) { proxyRoute = value.route || ''; proxyError = value.error || ''; }
   };
   return;
@@ -89,7 +98,9 @@ test('the panel treats auto and default[] as one model and distinguishes saved f
 
 test('one model family offers its tiers as a second dropdown', async t => {
     const ui = await panel(t);
-    ui.configure({ model: 'deepseek-v41-flash-1017-high', modelPolicy: 'panel' }, [
+    // The tiers are reachable only over the CLI transport, which drives
+    // "agent -p" and takes the alias that really selects them.
+    ui.configure({ model: 'deepseek-v41-flash-1017-high', modelPolicy: 'panel', transport: 'cli' }, [
         { id: 'deepseek-v41-flash-1017-none', name: 'DeepSeek V4.1 Flash 1017 None' },
         { id: 'deepseek-v41-flash-1017-low', name: 'DeepSeek V4.1 Flash 1017 Low' },
         { id: 'deepseek-v41-flash-1017-medium', name: 'DeepSeek V4.1 Flash 1017 Medium' },
@@ -116,9 +127,28 @@ test('one model family offers its tiers as a second dropdown', async t => {
     assert.equal(ui.nodes.get('model-tier').disabled, false);
 });
 
+test('over ACP the tiers are not offered, because none of them can be reached', async t => {
+    const ui = await panel(t);
+    ui.configure({ model: 'deepseek-v41-flash-1017-high', modelPolicy: 'panel', transport: 'acp' }, [
+        { id: 'deepseek-v41-flash-1017-none', name: 'DeepSeek None' },
+        { id: 'deepseek-v41-flash-1017-high', name: 'DeepSeek High' },
+        { id: 'deepseek-v41-flash-1017-max', name: 'DeepSeek Max' },
+    ]);
+    ui.renderModel();
+    // Cursor reads its model from its own config file over ACP and publishes
+    // one fixed parameter set per model, so every tier resolves to the same
+    // variant. Offering the choice would be a lie the operator finds in the
+    // usage log.
+    const tier = ui.nodes.get('model-tier');
+    assert.equal(tier.disabled, true);
+    assert.equal(tier.children.length, 1);
+    assert.equal(tier.children[0].value, '');
+    assert.match(tier.children[0].textContent, /ACP/);
+});
+
 test('picking a tier saves the full alias it stands for', async t => {
     const ui = await panel(t);
-    ui.configure({ model: 'deepseek-v41-flash-1017-high', modelPolicy: 'panel' }, [
+    ui.configure({ model: 'deepseek-v41-flash-1017-high', modelPolicy: 'panel', transport: 'cli' }, [
         { id: 'deepseek-v41-flash-1017-high', name: 'DeepSeek High' },
         { id: 'deepseek-v41-flash-1017-max', name: 'DeepSeek Max' },
     ]);
@@ -132,7 +162,7 @@ test('picking a tier saves the full alias it stands for', async t => {
 
 test('a single-tier model shows one inert option instead of an empty control', async t => {
     const ui = await panel(t);
-    ui.configure({ model: 'kimi-k2.7-code', modelPolicy: 'panel' }, [
+    ui.configure({ model: 'kimi-k2.7-code', modelPolicy: 'panel', transport: 'cli' }, [
         { id: 'kimi-k2.7-code', name: 'Kimi K2.7 Code' },
     ]);
     ui.renderModel();
