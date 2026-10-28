@@ -14,7 +14,7 @@ import { registerUsageRoutes } from '../lib/usage.js';
  *   - a stray backslash turns a regex class like /[\s-]/ into /[s-]/.
  *
  * The unit tests below all stub the DOM, so they would notice a broken script
- * only if they happened to reach the broken line. These two check the served
+ * only if they happened to reach the broken line. These check the served
  * artifact itself.
  */
 async function servedScript(t) {
@@ -37,23 +37,6 @@ test('the served panel script parses as JavaScript', async t => {
     assert.doesNotThrow(() => new Function(script), 'the browser must be able to parse the panel');
 });
 
-test('the served panel script keeps its whitespace class in the tier regex', async t => {
-    const script = await servedScript(t);
-    // The source writes the class doubled, so the browser sees one escape. What
-    // matters is what the BROWSER's regex does: /[s-]/ would match the letter
-    // "s" instead of whitespace, and the tier word is always preceded by a
-    // space — so every model would keep its tier suffix and the browser would
-    // list "Grok 4.7  Low" as a model name.
-    const match = /if \(\/\[([^\]]*)\]fast\$/.exec(script);
-    assert.ok(match !== null, 'the tier-stripping regex must be present');
-    assert.ok(match[1].includes('\\s'),
-        `the class must keep its backslash, got ${JSON.stringify(match[1])}`);
-    // And the class the browser builds must actually match a space.
-    assert.ok(new RegExp(`[${match[1]}]`).test(' '), 'the class must match whitespace');
-    assert.ok(!new RegExp(`[${match[1].replace('\\s', '')}]`).test(' '),
-        'without the backslash the class would match "s" and "-" only');
-});
-
 test('no comment inside the panel script carries a backtick', async t => {
     const script = await servedScript(t);
     // The panel script is emitted through a template literal, so a backtick in a
@@ -70,4 +53,36 @@ test('no comment inside the panel script carries a backtick', async t => {
     });
     assert.deepEqual(offenders, [],
         'a backtick in a panel comment truncates the served script');
+});
+
+test('the served panel script keeps every whitespace class intact', async t => {
+    const script = await servedScript(t);
+    // A template literal eats one backslash, so a class written as \s in the
+    // source arrives as \s. The failure mode is silent: /s+/g replaces the LETTER
+    // s with a space, which turned "opus" into "Opu " and "flash" into "Fla h" in
+    // the model list — so every class that mixes whitespace with a literal has
+    // to be checked where it is used.
+    const classes = [...script.matchAll(/\/\[([^\]\n]*)\]/g)].map(match => match[1]);
+    for (const klass of classes) {
+        // A class that lost its backslash matches the letter s instead of
+        // whitespace. The digit classes never carry one and never lose it.
+        if (!klass.includes('s'))
+            continue;
+        assert.ok(klass.includes('\\s'),
+            `the class [${klass}] must keep its backslash`);
+        assert.ok(new RegExp(`[${klass}]`).test(' '),
+            `the class [${klass}] must match a space`);
+    }
+});
+
+test('the served panel script collapses whitespace with a real class', async t => {
+    const script = await servedScript(t);
+    // The label cleanup turns a run of dashes or spaces into one space. Written
+    // as /s+/g it would eat the letter s of "opus" instead.
+    const match = /replace\(\/([^/]*)\/g, ' '\)/.exec(script);
+    assert.ok(match !== null, 'the label cleanup must be present');
+    assert.ok(match[1].includes('\\s'),
+        `the cleanup class must keep its backslash, got ${JSON.stringify(match[1])}`);
+    assert.ok(new RegExp(match[1]).test('  '),
+        'the cleanup class must match a run of whitespace');
 });
