@@ -194,10 +194,10 @@ test('the panel saves Auto and the lock together', async t => {
     ui.nodes.get('model-save').listeners.click();
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(JSON.parse(ui.requests[0].options.body), {
-        // The depth picker travels with the same save: one click must not
-        // leave a control the card shows unsaved.
+        // The depth and transport pickers travel with the same save: one click
+        // must not leave a control the card shows unsaved.
         model: 'default[]', modelPolicy: 'panel', proxy: '', maxChildDepth: 2,
-        attribution: 'off', disabledModels: [],
+        attribution: 'off', transport: 'acp', disabledModels: [],
     });
     assert.match(ui.nodes.get('model-state').textContent, /已锁定模型/);
 });
