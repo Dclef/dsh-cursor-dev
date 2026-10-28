@@ -38,7 +38,7 @@ agent status --format json
 
 ## 2. 选择安装来源
 
-**当前源码版本：** `0.12.6`，收紧原生子智能体的边界，共修掉五处：`cursor_subagent` 失败时的诊断先做脱敏再回父会话，`Bearer`/`Basic` 令牌、`sk-`/`ghp_` 这类密钥、`api_key=`/`token=`/`password=` 形式的赋值和整段绝对路径都会被替换，但失败原因（如 `initialize failed`、`ENOENT`）保留，仍可据此排查；运行在启动阶段被取消时不再向目录公告一个调用方从未收到的子会话，卸载时也就不会在面板里留下这一行；公告失败时保留原始错误，清理阶段的失败改为附带而非覆盖它；放弃的运行也会回收已拿到的进程租约，不再让迟到进程活过调用方已放弃的那次调用；启动 Cursor 子进程前会先清掉继承到的凭据形态变量和 `DSH_`/`DEEPSEEK_` 内部变量，`CURSOR_CONFIG_DIR`、`CURSOR_HOME`、`XDG_CONFIG_HOME` 保留以维持 Cursor 自身登录发现。DSH 兼容性不变，开发依赖 `@deepseek-ai/dsh` 仍为 `0.2.1-rc.3`，`>=0.2.1-rc.2 <0.3.0-0` 与稳定版本 `>=0.2.1 <0.3.0` 的支持不变。同时保留额度耗尽保护（三个额度都到上限时提前拒绝，用量取不到时不拦截）、可点击的子会话轨迹，以及面板的四项草稿保留。npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。插件市场已收录本插件，卡片版本随目录探测更新。
+**当前源码版本：** `0.12.7`，把模型和档位分开，并新增可切换的执行通道：Cursor 对每个模型最多发布五个档位（none/low/medium/high/max），每个档位另有一个快速版，以前面板把这些平铺成 270 行，现在按模型折叠成 44 行，档位收进「档位」下拉里选择；Cursor 的 ACP 模式从它自己的配置文件读取模型、忽略命令行参数，而且每个模型只发布一组固定参数，别的档位根本选不了，所以面板新增「执行通道」下拉，ACP 是默认通道，会话常驻、可在会话内换模型，但档位受限，CLI 通道每轮启动一个进程、使用 Cursor 自己的档位别名，能真正改动档位（比如去掉 `grok-4.7` 的 fast、把 deepseek 调到 max），CLI 的运行同样会出现在「运行中的 CURSOR 会话」里，会话依然可见、可以续聊；ACP 下档位不可选，面板会说明原因，不再给出选了也不生效的选项；新安装默认使用 Auto，具体模型由 Cursor 账号决定；结果里的模型名现在是你实际跑的那个档位，而不是名册折叠后的名字；模型目录按当前网络出口实时获取，不同地区可用的模型不同，切换通道后会重新读取。DSH 兼容性不变，开发依赖 `@deepseek-ai/dsh` 仍为 `0.2.1-rc.3`，`>=0.2.1-rc.2 <0.3.0-0` 与稳定版本 `>=0.2.1 <0.3.0` 的支持不变。同时保留额度耗尽保护（三个额度都到上限时提前拒绝，用量取不到时不拦截）、可点击的子会话轨迹，以及面板的四项草稿保留。npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。插件市场已收录本插件，卡片版本随目录探测更新。
 
 | 你要安装的内容 | 安装来源 |
 | --- | --- |
@@ -46,7 +46,7 @@ agent status --format json
 | npm 公共源上的已发布版本 | `dsh-cursor-dev`（`0.11.0` 起可用，按包内 `files` 白名单安装，版本以 npm 的 `latest` 标签为准） |
 | 公开仓库的当前版本（推荐） | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
 | 你本地的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
-| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.6.tgz` |
+| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.7.tgz` |
 
 表中本地路径是示例，需要换成实际位置。npm 来源取 registry 上发布的最新版本；Git 来源会取得仓库默认分支的最新提交；`.tgz` 是某一刻的固定快照——要跟进后续改动就用 Git 来源。
 
@@ -88,7 +88,7 @@ dsh plugin add "/home/you/plugins/dsh-cursor-dev"
 安装收到的包：
 
 ```powershell
-dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.6.tgz"
+dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.7.tgz"
 ```
 
 终端没有 `dsh` 命令时，使用桌面插件管理即可。不要把在任意项目目录执行 `npm install` 当成已经在 DSH 当前 profile 中启用插件。
