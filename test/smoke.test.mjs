@@ -35,6 +35,8 @@ import { writeSettings } from '../lib/settings.js';
 const here = fileURLToPath(new URL('..', import.meta.url));
 /** The resolved Cursor CLI on this machine, or undefined when not installed. */
 const agent = resolveAgent(process.env);
+// 常规回归必须离线；只有操作者明确启用才访问真实额度或启动真实 Cursor。
+const liveCursor = process.env.DSH_CURSOR_LIVE_TESTS === '1';
 
 // Booting the plugin makes it keep Cursor's own `cli-config.json` free of the
 // commit-attribution trailer, and this suite really does boot it. Point that
@@ -534,7 +536,7 @@ test('usage normalization converts cents and keeps every bucket', () => {
     assert.equal(usage.billingCycle.end > usage.billingCycle.start, true);
 });
 
-test('the real Cursor account returns live quota data', async () => {
+test('the real Cursor account returns live quota data', { skip: !liveCursor }, async () => {
     const auth = await readAccessToken(process.env);
     assert.equal(auth.ok, true, `no Cursor token at ${authFilePath(process.env)}: ${auth.error}`);
     assert.equal(typeof auth.token, 'string');
@@ -831,7 +833,7 @@ test('the routes answer real HTTP and a throwing view becomes a 500', { timeout:
     }
 });
 
-test('the child agent really edits a file and the result carries a real diff', { timeout: 900_000 }, async () => {
+test('the child agent really edits a file and the result carries a real diff', { timeout: 900_000, skip: !liveCursor }, async () => {
     assert.ok(agent !== undefined, 'no Cursor CLI found');
     const workspace = await mkdtemp(join(tmpdir(), 'dsh-cursor-ws-'));
     const dataDir = await mkdtemp(join(tmpdir(), 'dsh-cursor-data-'));
@@ -947,7 +949,7 @@ test('the child agent really edits a file and the result carries a real diff', {
     }
 });
 
-test('a bad model is rejected without breaking the pool', { timeout: 300_000 }, async () => {
+test('a bad model is rejected without breaking the pool', { timeout: 300_000, skip: !liveCursor }, async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'dsh-cursor-data2-'));
     const dir = await mkdtemp(join(tmpdir(), 'dsh-cursor-ws2-'));
     const journal = new RunJournal({});

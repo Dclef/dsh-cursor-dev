@@ -55,7 +55,7 @@ flowchart LR
 3. 按 DSH 提示完成加载；涉及后台代码更新时重启 DSH，然后刷新页面。在 Cursor 面板中选择模型并保存。
 4. 明确告诉父模型使用 `cursor_code`，或者用下面的斜杠命令派发第一个任务。
 
-**版本说明（0.12.9）：** 本版把开发和验证基线跟进到 DSH `0.2.1-rc.5`。**验证基线跟进：** 开发依赖 `@deepseek-ai/dsh` 从 `0.2.1-rc.3` 升到 `0.2.1-rc.5`，全部 278 个离线用例在 rc.5 上跑通；rc.3 到 rc.5 之间宿主的 subagent 契约没有破坏性变更，插件代码不需要改动。**兼容范围不变：** `engines.dsh` 仍是 `0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-rc.1 || >=0.2.1-rc.2 <0.3.0-0`，本来就覆盖 rc.4 和 rc.5，稳定版 `>=0.2.1 <0.3.0` 的支持也不变。0.12.7 引入的模型与档位分离、ACP/CLI 双通道、档位只在选得到时出现、默认 Auto 等能力照旧可用。保留额度耗尽保护：调用 `cursor_code` 或通过原生子智能体派发之前先检查 Cursor 用量，总、Auto、API 三个额度都到上限时直接拒绝并说明原因，不再把任务派出去后中途失败；用量接口暂时取不到时不拦截调用。`cursor_subagent` 仍会生成可点击的对话子会话。插件市场已收录本插件，卡片版本随目录探测更新；npm 包名为 `dsh-cursor-dev`，实际已发布版本以 npm 的 `latest` 标签为准。要跟进后续改动请用 Git 来源；`.tgz` 是某一刻的固定快照。详见[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
+**版本说明（0.12.10）：** 修复 Cursor 工具卡缺少真实名称、参数与输出，以及 CLI 失败/取消后丢失执行步骤、把实际文件改动误报为 `NONE` 的问题。成功判定同时核对 CLI 终态和实际进程退出；无法完整扫描时明确显示 `UNKNOWN/PARTIAL`，不推断虚假的新增或删除。补齐只有完成事件的工具时间线和取消状态。`npm test` 默认禁用三项真实 Cursor/账号调用，必须显式设置 `DSH_CURSOR_LIVE_TESTS=1` 才会启用。本次 Windows 验收 301 项：291 通过、10 跳过、0 失败。开发基线仍为 DSH `0.2.1-rc.5`，兼容范围与模型/档位、续聊、额度保护不变。更新后台代码后请重启 DSH 并刷新页面；不会自动改写旧日志。详见[发布说明](docs/releases/0.12.10.md)及[安装来源与版本](docs/INSTALL.md#2-选择安装来源)。
 
 运行要求：DSH `0.2.0-rc.1`、`0.2.0-rc.2`、`0.2.1-rc.1`、`0.2.1-rc.2`、`0.2.1-rc.3`、`0.2.1-rc.4`、`0.2.1-rc.5` 或 `>=0.2.1 <0.3.0` 的稳定版本（当前桌面版运行时为 `0.2.1-rc.5`）；Node.js `^22.19.0 || >=24.0.0`；已登录且可访问服务的 Cursor CLI。原生子智能体功能需要 DSH 的 `subagents`、`agents` 服务，后台任务还需要对应任务服务，建议使用当前 DSH 桌面版。CLI 安装方法见 [Cursor 官方文档](https://cursor.com/docs/cli)。
 
@@ -211,10 +211,10 @@ Cursor 默认会在子智能体做的提交上追加 `Co-authored-by: Cursor`，
 
 ```sh
 npm install
-node --test --test-force-exit --test-skip-pattern="the child agent really edits a file|a bad model is rejected|the real Cursor account returns live quota data" "test/**/*.test.mjs"
+npm test
 ```
 
-完整测试命令为 `npm test`。上面的命令跳过三个真实 CLI/账号测试，不派发真实编码任务；其余 smoke 测试仍包含只读额度 HTTP 检查，因此并非完全离线。真实编码测试需要 Cursor 登录和网络，执行任务会使用该账号额度。Windows 下的 Keychain 测试因需要 POSIX shell 而跳过，不能据此认定 macOS 已验证；企业证书环境可使用 Node.js 的 `--use-system-ca`。打包使用 `npm pack` 或 `pnpm pack`，发布前按[分发检查](docs/INSTALL.md#7-维护者分发前检查)核对安装包和版本。
+默认 `npm test` 不派发真实 Cursor 编码任务，也不查询真实账户额度；保留本地 HTTP 和协议模拟测试。只有显式设置 `DSH_CURSOR_LIVE_TESTS=1` 才启用三个真实 CLI/账号冒烟，届时需要登录和网络，并可能消耗账号额度。Windows 下七个依赖 POSIX shell/Keychain 的场景跳过，不能据此认定 macOS 已验证。企业证书环境可使用 Node.js 的 `--use-system-ca`。打包使用 `npm pack` 或 `pnpm pack`，发布前按[分发检查](docs/INSTALL.md#7-维护者分发前检查)核对安装包和版本。
 
 ## English
 
@@ -240,7 +240,7 @@ See the [installation guide](docs/INSTALL.md) for detailed setup and troubleshoo
 3. Restart DSH when backend changes require it, then refresh the page. Open the Cursor panel under `/plugins/dsh-cursor-dev/`, select a model and save it. The history list keeps one row per run forever, so it sits in a height-capped scroll box and folds away when you click its heading (the choice is remembered); a row's **Delete** link clears that run's index record, journal and mirrored child — the same chain `resetSession` uses — and arms on the first click so the irreversible second click is deliberate.
 4. Ask the parent to use `cursor_code`, or send `/cursor-subagent` followed by a complete task. The command dispatches directly and hands a completion or failure summary back to the original parent.
 
-Version `0.12.9` moves the development and verification baseline to DSH `0.2.1-rc.5`. **Baseline moved:** the `@deepseek-ai/dsh` development dependency goes from `0.2.1-rc.3` to `0.2.1-rc.5`, and all 278 offline cases pass on rc.5; the host's subagent contract did not change in a breaking way between rc.3 and rc.5, so no plugin code had to change. **Compatibility range unchanged:** `engines.dsh` stays `0.2.0-rc.1 || 0.2.0-rc.2 || 0.2.1-rc.1 || >=0.2.1-rc.2 <0.3.0-0`, which already covers rc.4 and rc.5, and stable support `>=0.2.1 <0.3.0` remains. Everything 0.12.7 introduced — models separated from tiers, the ACP/CLI channel choice, tiers offered only where they can be reached, Auto by default — works as before. Quota exhaustion protection is retained: before `cursor_code` or a native subagent call starts, the plugin reads Cursor usage and refuses the call, explaining why, when the total, Auto and API buckets are all at their limit, instead of dispatching a run that later fails mid-way. A usage lookup that cannot be completed never blocks a call. `cursor_subagent` still creates a clickable transcript child. The dsh-market catalog already lists this plugin and updates its displayed version on subsequent probes. The public npm package is `dsh-cursor-dev`; its `latest` tag identifies the published version. Use the Git source to follow later changes; a `.tgz` is a fixed snapshot.
+Version `0.12.10` restores real tool names, arguments and output in child transcripts, and preserves observed steps and file changes after CLI failure or cancellation instead of incorrectly reporting `NONE`. Success requires both a successful terminal event and a successful process exit; incomplete scans are explicitly `UNKNOWN/PARTIAL` and cannot fabricate additions or deletions. Completion-only tools remain in the timeline and cancelled results are not marked successful. `npm test` now disables the three real Cursor/account cases unless `DSH_CURSOR_LIVE_TESTS=1` is explicitly set. Windows verification: 301 tests, 291 passed, 10 skipped, zero failures. The DSH `0.2.1-rc.5` development baseline and existing compatibility range remain unchanged. Restart DSH after updating backend code and refresh the page; older logs are not rewritten. See the [release notes](docs/releases/0.12.10.md).
 
 Requirements: DSH `0.2.0-rc.1`, `0.2.0-rc.2`, `0.2.1-rc.1`, `0.2.1-rc.2`, `0.2.1-rc.3`, `0.2.1-rc.4`, `0.2.1-rc.5` or a stable version `>=0.2.1 <0.3.0` (the current desktop runtime is `0.2.1-rc.5`); Node.js `^22.19.0 || >=24.0.0`; an authenticated Cursor CLI account with service access. Native dispatch additionally needs DSH's `subagents` and `agents` services, and background runs need the host's job services. A current DSH desktop installation is recommended.
 
