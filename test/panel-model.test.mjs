@@ -5,12 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { registerUsageRoutes } from '../lib/usage.js';
+import { readSettings, writeSettings } from '../lib/settings.js';
 
 // Exercise the actual inline dashboard script with a small DOM surface. No
 // network, CLI, browser install or reimplementation of model-selection logic.
-async function panel(t) {
+async function panel(t, { initial, respond } = {}) {
     const dir = await mkdtemp(join(tmpdir(), 'cursor-panel-model-'));
     t.after(() => rm(dir, { recursive: true, force: true }));
+    if (initial) writeSettings(dir, initial);
     const routes = new Map();
     registerUsageRoutes({ get: () => ({ register: route => routes.set(route.path, route) }) }, {
         dataDir: dir, pool: { snapshot: () => [] }, index: { list: () => [] },
@@ -38,7 +40,7 @@ async function panel(t) {
     const document = {
         createElement: element,
         getElementById(id) {
-            if (!nodes.has(id)) nodes.set(id, element(id === 'model-family' || id === 'model-tier' || id === 'depth' || id === 'attribution' ? 'select' : 'div'));
+            if (!nodes.has(id)) nodes.set(id, element(id === 'model-family' || id === 'model-tier' || id === 'depth' || id === 'attribution' || id === 'transport' ? 'select' : 'div'));
             return nodes.get(id);
         },
     };
@@ -48,6 +50,7 @@ async function panel(t) {
         document, window: { localStorage: { getItem: () => 'zh' } },
         fetch: async (url, options) => {
             requests.push({ url, options });
+            if (respond) return { json: async () => respond(url, options, dir) };
             const patch = JSON.parse(options.body);
             return { json: async () => ({ settings: patch, effectiveModel: patch.model }) };
         },
@@ -55,6 +58,7 @@ async function panel(t) {
     const executable = source.replace('\n  applyLanguage();\n', `
   globalThis.panelTest = {
     renderModel: renderModel, modelCell: modelCell,
+    loadSettings: loadSettings, post: post,
     configure: function(value, list) {
       settings = value;
       models = list || [];
@@ -72,8 +76,76 @@ async function panel(t) {
 `);
     assert.notEqual(executable, source, 'test harness intercepts initial network polling');
     runInNewContext(executable, context);
-    return { ...context.panelTest, nodes, requests };
+    return { ...context.panelTest, nodes, requests, bootstrap: JSON.parse(bootstrap), dir };
 }
+
+const TRANSPORT_MODELS = [
+    { id: 'grok-4.7-high', name: 'Grok 4.7 High' },
+    { id: 'grok-4.7-xhigh', name: 'Grok 4.7 Extra High' },
+];
+
+test('reopening the panel restores saved CLI before the settings GET answers', async t => {
+    const ui = await panel(t, { initial: {
+        model: 'grok-4.7-xhigh', transport: 'cli', models: TRANSPORT_MODELS, modelsSource: 'cli',
+    } });
+    ui.renderModel();
+    assert.equal(ui.bootstrap.settings.transport, 'cli', 'the first paint carries the saved transport');
+    assert.equal(ui.nodes.get('transport').value, 'cli');
+    assert.equal(ui.nodes.get('model-tier').disabled, false, 'saved CLI restores its selectable tiers');
+    assert.equal(ui.nodes.get('model-tier').value, 'grok-4.7-xhigh');
+});
+
+test('settings GET and model refresh restore transport without discarding a new draft', async t => {
+    let savedTransport = 'cli';
+    const ui = await panel(t, { respond: () => ({
+        settings: { model: 'grok-4.7-xhigh', transport: savedTransport },
+        models: { ok: true, list: TRANSPORT_MODELS, source: savedTransport },
+    }) });
+    await ui.loadSettings(false);
+    assert.equal(ui.nodes.get('transport').value, 'cli', 'GET must update the transport used to paint controls');
+    assert.equal(ui.nodes.get('model-tier').disabled, false);
+
+    savedTransport = 'acp';
+    await ui.loadSettings(true);
+    assert.equal(ui.nodes.get('transport').value, 'acp', 'refresh follows the current stored value');
+    assert.equal(ui.nodes.get('model-tier').disabled, true);
+
+    ui.nodes.get('transport').value = 'cli';
+    ui.nodes.get('transport').listeners.change();
+    await ui.loadSettings(true);
+    assert.equal(ui.nodes.get('transport').value, 'cli', 'a refresh must not replace an unsaved choice');
+    assert.equal(ui.nodes.get('model-tier').disabled, false);
+});
+
+test('an unrelated POST cannot clear an unsaved transport choice', async t => {
+    const ui = await panel(t, { respond: () => ({
+        settings: { model: 'grok-4.7-xhigh', transport: 'acp' },
+        models: { ok: true, list: TRANSPORT_MODELS, source: 'acp' },
+    }) });
+    await ui.loadSettings(false);
+    ui.nodes.get('transport').value = 'cli';
+    ui.nodes.get('transport').listeners.change();
+    await ui.post({ language: 'en' });
+    assert.equal(ui.nodes.get('transport').value, 'cli', 'only an echoed transport save may clear the draft');
+    assert.equal(ui.nodes.get('model-tier').disabled, false);
+});
+
+test('saving another panel field after reopening keeps the saved CLI transport', async t => {
+    const ui = await panel(t, {
+        initial: { model: 'grok-4.7-xhigh', transport: 'cli', models: TRANSPORT_MODELS, modelsSource: 'cli' },
+        respond: (_url, options, dir) => {
+            if (options.method === 'POST') writeSettings(dir, JSON.parse(options.body));
+            return { settings: readSettings(dir), effectiveModel: 'grok-4.7-xhigh' };
+        },
+    });
+    await ui.loadSettings(true);
+    ui.nodes.get('model-lock').checked = true;
+    ui.nodes.get('model-save').listeners.click();
+    await new Promise(resolve => setImmediate(resolve));
+    const save = ui.requests.find(request => request.options.method === 'POST');
+    assert.equal(JSON.parse(save.options.body).transport, 'cli', 'a stale ACP control must never overwrite the file');
+    assert.equal(readSettings(ui.dir).transport, 'cli');
+});
 
 test('the panel treats auto and default[] as one model and distinguishes saved from observed state', async t => {
     const ui = await panel(t);

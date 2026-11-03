@@ -38,7 +38,7 @@ agent status --format json
 
 ## 2. 选择安装来源
 
-**当前源码版本：** `0.12.10`。本版修复工具详情不可见、CLI 异常/取消后丢失真实步骤及文件证据、非零退出误判成功和不完整扫描误报新增/删除；真实 CLI/账号冒烟改为显式启用。Windows 下 301 项测试中 291 通过、10 跳过、0 失败。开发基线仍为 DSH `0.2.1-rc.5`，`engines.dsh`、模型档位、续聊及额度保护不变。npm 安装以公共 registry 的 `latest` 为准，Git/市场来源以远端默认分支为准；`.tgz` 是固定快照。更新当前 profile 实际加载的插件后重启 DSH 并刷新页面，不会自动修复历史日志。详见[0.12.10 发布说明](releases/0.12.10.md)。
+**当前源码版本：** `0.12.11`。本版修复已保存 CLI、重开却显示 ACP 并可能在后续保存时写回错误通道的问题；恢复首屏及刷新状态、保留未保存选择、避免迟到探测返回旧设置，并让保存后的通道同步到运行池。包含 0.12.10 的工具真实名称、参数、输出及异常证据修复。Windows 离线回归 309 项：299 通过、10 跳过、0 失败；实际安装副本另有 54 项相关回归全部通过。开发基线仍为 DSH `0.2.1-rc.5`，兼容范围和依赖不变。npm 安装以公共 registry 的 `latest` 为准，Git/市场来源以远端默认分支为准；`.tgz` 是固定快照。更新当前 profile 实际加载的插件后，待运行任务结束再重启 DSH 并刷新页面，历史未保存的内容不会自动恢复。详见[0.12.11 发布说明](releases/0.12.11.md)。
 
 | 你要安装的内容 | 安装来源 |
 | --- | --- |
@@ -46,7 +46,7 @@ agent status --format json
 | npm 公共源上的已发布版本 | `dsh-cursor-dev`（`0.11.0` 起可用，按包内 `files` 白名单安装，版本以 npm 的 `latest` 标签为准） |
 | 公开仓库的当前版本（推荐） | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
 | 你本地的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
-| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.10.tgz` |
+| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.11.tgz` |
 
 表中本地路径是示例，需要换成实际位置。npm 来源取 registry 上发布的最新版本；Git 来源会取得仓库默认分支的最新提交；`.tgz` 是某一刻的固定快照——要跟进后续改动就用 Git 来源。
 
@@ -88,7 +88,7 @@ dsh plugin add "/home/you/plugins/dsh-cursor-dev"
 安装收到的包：
 
 ```powershell
-dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.10.tgz"
+dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.11.tgz"
 ```
 
 终端没有 `dsh` 命令时，使用桌面插件管理即可。不要把在任意项目目录执行 `npm install` 当成已经在 DSH 当前 profile 中启用插件。

@@ -491,6 +491,72 @@ test('the settings API writes what the panel sends, and only that', async () => 
     });
 });
 
+test('CLI transport survives save, reopening, model refresh and unrelated settings writes', async () => {
+    await withDataDir(async dir => {
+        const { ctx, routes } = fakeContext();
+        const spawn = fakeSpawn({ stdout: LISTING });
+        const refreshes = [];
+        let probes = 0;
+        registerSettingsRoutes(ctx, cliDeps(dir, spawn, {
+            refreshTransport: transport => refreshes.push({ transport, stored: readSettings(dir).transport }),
+            probeModelRoster: async () => { probes++; return { ok: true, list: [{ id: 'default[]', name: 'Auto' }] }; },
+        }));
+        const route = routes[0];
+        const opened = await call(route, {});
+        assert.equal(opened.json.settings.transport, 'acp');
+        assert.equal(probes, 1);
+
+        const saved = await call(route, { method: 'POST', body: JSON.stringify({ transport: 'cli' }) });
+        assert.equal(saved.json.settings.transport, 'cli');
+        assert.equal(saved.json.models.source, 'cli');
+        assert.deepEqual(refreshes, [{ transport: 'cli', stored: 'cli' }], 'the callback sees the committed choice');
+        for (const url of ['/plugins/dsh-cursor-dev/api/settings', '/plugins/dsh-cursor-dev/api/settings?refreshModels=1']) {
+            const reopened = await call(route, { url });
+            assert.equal(reopened.json.settings.transport, 'cli');
+            assert.equal(reopened.json.models.source, 'cli');
+        }
+        await call(route, { method: 'POST', body: JSON.stringify({ refreshModels: true }) });
+        await call(route, { method: 'POST', body: JSON.stringify({ language: 'en', transport: 'invalid' }) });
+        assert.equal(readSettings(dir).transport, 'cli', 'cache and unrelated writes keep the saved transport');
+        assert.equal(probes, 1, 'CLI refresh never probes ACP');
+        assert.equal(refreshes.length, 1, 'unrelated or invalid patches never switch the pool');
+    });
+});
+
+test('a settings GET waiting for an ACP probe returns a CLI choice saved while it waited', async () => {
+    await withDataDir(async dir => {
+        const { ctx, routes } = fakeContext();
+        let finishProbe;
+        registerSettingsRoutes(ctx, cliDeps(dir, fakeSpawn({ stdout: LISTING }), {
+            probeModelRoster: () => new Promise(resolve => { finishProbe = resolve; }),
+        }));
+        const pending = call(routes[0], {});
+        assert.equal(typeof finishProbe, 'function', 'the opening GET is waiting on its ACP roster');
+        const saved = await call(routes[0], { method: 'POST', body: JSON.stringify({ transport: 'cli' }) });
+        assert.equal(saved.json.settings.transport, 'cli');
+        finishProbe({ ok: true, list: [{ id: 'default[]', name: 'Auto' }] });
+        const opened = await pending;
+        assert.equal(opened.json.settings.transport, 'cli', 'the late GET must not restore its pre-probe ACP snapshot');
+        assert.equal(readSettings(dir).transport, 'cli');
+    });
+});
+
+test('a model probe finishing after a CLI save cannot overwrite that transport', async () => {
+    await withDataDir(async dir => {
+        let finishProbe;
+        const pending = modelsFor(dir, cliDeps(dir, fakeSpawn({ stdout: LISTING }), {
+            probeModelRoster: () => new Promise(resolve => { finishProbe = resolve; }),
+        }));
+        writeSettings(dir, { transport: 'cli' });
+        finishProbe({ ok: true, list: [{ id: 'default[]', name: 'Auto' }] });
+        await pending;
+        assert.equal(readSettings(dir).transport, 'cli', 'an ACP cache update merges into the latest settings');
+        const refreshed = await modelsFor(dir, cliDeps(dir, fakeSpawn({ stdout: LISTING })));
+        assert.equal(refreshed.source, 'cli', 'the next read rejects a cache from the previous transport');
+        assert.equal(readSettings(dir).transport, 'cli');
+    });
+});
+
 test('saving a proxy re-resolves it for the next spawn, not the next restart', async () => {
     await withDataDir(async (dir) => {
         const { ctx, routes } = fakeContext();
