@@ -38,7 +38,7 @@ agent status --format json
 
 ## 2. 选择安装来源
 
-**当前源码版本：** `0.12.13`。本版让失败与版本可诊断：运行失败的真实原因会写入镜像子会话（此前只剩 "run failed: error"）；状态接口新增 Cursor CLI 版本探测与安装版本比对，面板显示构建号并在装了新版但未重启时提示；新增 10 项离线回归；Windows 离线回归 323 项：313 通过、10 跳过、0 失败。开发基线仍为 DSH `0.2.1-rc.5`，兼容范围与依赖不变。完整步骤见[安装与首次使用](INSTALL.md)。
+**当前源码版本：** `0.12.14`。本版兼容新版 Windows Cursor CLI 的 DPAPI 登录存储，修复用量面板误报未登录；切换 ACP / CLI 不会打断正在启动或执行的任务；ACP 拒绝模型时会给出明确原因。Windows 离线回归 329 项：319 通过、10 跳过、0 失败。开发基线、兼容范围与依赖不变。详见[发布说明](releases/0.12.14.md)。
 
 | 你要安装的内容 | 安装来源 |
 | --- | --- |
@@ -46,7 +46,7 @@ agent status --format json
 | npm 公共源上的已发布版本 | `dsh-cursor-dev`（`0.11.0` 起可用，按包内 `files` 白名单安装，版本以 npm 的 `latest` 标签为准） |
 | 公开仓库的当前版本（推荐） | `git+https://github.com/Dclef/dsh-cursor-dev.git` |
 | 你本地的源码目录 | 该目录的绝对路径，例如 `D:/plugins/dsh-cursor-dev` |
-| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.13.tgz` |
+| 维护者提供的源码快照或发布包 | `.tgz` 文件的绝对路径，例如 `D:/Downloads/dsh-cursor-dev-0.12.14.tgz` |
 
 表中本地路径是示例，需要换成实际位置。npm 来源取 registry 上发布的最新版本；Git 来源会取得仓库默认分支的最新提交；`.tgz` 是某一刻的固定快照——要跟进后续改动就用 Git 来源。
 
@@ -88,7 +88,7 @@ dsh plugin add "/home/you/plugins/dsh-cursor-dev"
 安装收到的包：
 
 ```powershell
-dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.13.tgz"
+dsh plugin add "D:/Downloads/dsh-cursor-dev-0.12.14.tgz"
 ```
 
 终端没有 `dsh` 命令时，使用桌面插件管理即可。不要把在任意项目目录执行 `npm install` 当成已经在 DSH 当前 profile 中启用插件。
