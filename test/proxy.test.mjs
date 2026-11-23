@@ -168,13 +168,14 @@ test('the usage client resolves the proxy once and reports it', async () => {
         },
     });
 
-    const snapshot = await client.get({ force: true });
+    const env = { CURSOR_AUTH_TOKEN: 'fixture-proxy-token' };
+    const snapshot = await client.get({ force: true, env });
     assert.equal(snapshot.ok, true);
     assert.equal(snapshot.transport, 'http://127.0.0.1:7890 (test)');
     assert.match(calls[0].url, /DashboardService\/GetCurrentPeriodUsage$/);
     assert.equal(calls[0].init.method, 'POST');
     assert.equal(calls[0].init.headers['connect-protocol-version'], '1');
 
-    await client.get({ force: true });
+    await client.get({ force: true, env });
     assert.equal(reads, 1, 'discovery runs once per client, not once per request');
 });

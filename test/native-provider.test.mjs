@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { createNativeCursorBridge, createCursorProvider, cursorStopReason } from '../lib/native-provider.js';
+import { CursorSession } from '../lib/cursor-session.js';
 import { createMirrorHub } from '../lib/mirror.js';
 import { cursorCodeTool } from '../lib/tool.js';
 import { SessionPool } from '../lib/session-pool.js';
@@ -349,6 +350,29 @@ test('prompt failure after publication settles as an error and preserves partial
     assert.match(result.diagnostic, /fixture prompt failed/);
     assert.match(result.output[0].text, /work completed before transport error/);
     await run.dispose();
+});
+
+test('ACP startup reports a model refusal without dumping CLI stderr or its roster', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const spawn = () => {
+        queueMicrotask(() => {
+            stderr.end('unrelated fixture log\nCannot use this model: no-such-model. Available models: example-roster\n');
+            stdout.end();
+        });
+        return { stdin, stdout, stderr, done: Promise.resolve({ exitCode: 1, signal: null }), terminate() {} };
+    };
+    const session = new CursorSession({
+        resolved: { command: 'fixture', entry: undefined },
+        model: 'no-such-model', cwd: tmpdir(), env: {}, spawn,
+    }, () => {});
+    await assert.rejects(session.start(), error => {
+        assert.match(error.message, /ACP connection closed: Cannot use this model: no-such-model$/);
+        assert.doesNotMatch(error.message, /unrelated fixture log|example-roster/);
+        return true;
+    });
+    session.dispose();
 });
 
 test('pre-aborted, non-text, missing-workspace and unsupported requests fail before publication', async t => {

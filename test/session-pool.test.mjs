@@ -23,7 +23,14 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import { SessionPool } from '../lib/session-pool.js';
+import { CliSession } from '../lib/cli-runner.js';
 import { sameModel } from '../lib/models.js';
+
+function deferred() {
+    let resolve;
+    const promise = new Promise(yes => { resolve = yes; });
+    return { promise, resolve };
+}
 
 const FIXTURE_ROSTER = [
     { value: 'default[]', name: 'Auto' },
@@ -38,7 +45,7 @@ const FIXTURE_ROSTER = [
  * @param {string} current - the model the session reports as current.
  * @param {object[]} replay - updates a `session/load` replays before it settles.
  */
-function fakeAcp(current = 'composer-2.5[fast=true]', replay = []) {
+function fakeAcp(current = 'composer-2.5[fast=true]', replay = [], options = {}) {
     const toChild = new PassThrough();
     const fromChild = new PassThrough();
     const stderr = new PassThrough();
@@ -64,8 +71,13 @@ function fakeAcp(current = 'composer-2.5[fast=true]', replay = []) {
     let sessions = 0;
     const handle = request => {
         const { id, method, params } = request;
-        if (method === 'initialize')
-            return write({ jsonrpc: '2.0', id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
+        if (method === 'initialize') {
+            const reply = () => write({ jsonrpc: '2.0', id, result: { protocolVersion: 1, agentCapabilities: { loadSession: true } } });
+            options.onInitialize?.();
+            if (options.initGate !== undefined)
+                return options.initGate.promise.then(reply);
+            return reply();
+        }
         if (method === 'session/new')
             return write({ jsonrpc: '2.0', id, result: payload(`stub-${++sessions}`) });
         if (method === 'session/load') {
@@ -84,8 +96,14 @@ function fakeAcp(current = 'composer-2.5[fast=true]', replay = []) {
             current = params.value;
             return write({ jsonrpc: '2.0', id, result: { configOptions: [modelOption()] } });
         }
-        if (method === 'session/prompt')
+        if (method === 'session/prompt') {
+            options.onPrompt?.();
+            if (options.promptGate !== undefined) {
+                options.promptGate.promise.then(() => write({ jsonrpc: '2.0', id, result: { stopReason: 'end_turn' } }));
+                return;
+            }
             return write({ jsonrpc: '2.0', id, result: { stopReason: 'end_turn' } });
+        }
         if (method === 'session/set_mode')
             return write({ jsonrpc: '2.0', id, result: {} });
         return write({ jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } });
@@ -117,6 +135,36 @@ function fakeAcp(current = 'composer-2.5[fast=true]', replay = []) {
         sent,
         stop() { finish(); fromChild.end(); stderr.end(); },
     };
+}
+
+for (const stage of ['startup', 'prompt']) {
+    test(`transport changes during ACP ${stage} take effect only on the next turn`, { timeout: 5000 }, async () => {
+        const entered = deferred();
+        const gate = deferred();
+        const stub = fakeAcp('composer-2.5[fast=true]', [], stage === 'startup'
+            ? { initGate: gate, onInitialize: entered.resolve }
+            : { promptGate: gate, onPrompt: entered.resolve });
+        const pool = new SessionPool({ resolved: { command: 'stub', entry: undefined }, spawn: stub.spawn }, () => {});
+        const options = { key: 'transport::active#1', storeKey: 'transport::active', cwd: tmpdir() };
+        let first;
+        try {
+            const turn = pool.run(options, async lease => {
+                first = lease.session;
+                return lease.session.prompt('hold this turn');
+            });
+            await Promise.race([entered.promise, turn]);
+            pool.setTransport('cli');
+            gate.resolve();
+            assert.equal((await turn).stopReason, 'end_turn');
+            assert.equal(first.alive, false, 'the old transport is disposed when the turn finishes');
+            await pool.run(options, lease => assert.ok(lease.session instanceof CliSession));
+        }
+        finally {
+            gate.resolve();
+            await pool.dispose();
+            stub.stop();
+        }
+    });
 }
 
 /** The panel must not replay a conversation while its writer holds the turn. */

@@ -599,8 +599,13 @@ test('usage routes register against the host contract and answer HTTP', async ()
                 return { child: { session: { header: { id: 'session-restored', parentSession: options.parentSessionId } } }, mirror: { turn: 3, calls: 4 } };
             },
         };
+        const usageClient = new UsageClient({
+            proxy: null,
+            fetch: async () => ({ ok: true, status: 200,
+                text: async () => JSON.stringify({ planUsage: { totalSpend: 100 } }) }),
+        });
         const dispose = registerUsageRoutes(ctx, {
-            usage: new UsageClient({}),
+            usage: { get: opts => usageClient.get({ ...opts, env: { CURSOR_AUTH_TOKEN: 'fixture-route-token' } }) },
             pool: restorePool,
             journal,
             index,

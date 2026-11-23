@@ -4,11 +4,8 @@
  * The CLI's credential store is not one file across platforms: macOS keeps the
  * login in the login Keychain (generic-password items `cursor-access-token` /
  * `cursor-refresh-token` / `cursor-api-key`, all under account `cursor-user`),
- * Windows and Linux write `auth.json` into the per-user config directory, and
- * `AGENT_CLI_CREDENTIAL_STORE` can move any install between the file and the
- * memory-only store. Only the file spellings were read before, so a signed-in
- * macOS install produced `cannot read ~/.config/Cursor/auth.json: ENOENT` and
- * an empty quota dashboard.
+ * Windows can use DPAPI, and the legacy file store uses per-user `auth.json`.
+ * The tests use fixtures only, never the real Keychain or Windows login.
  *
  * These tests pin the lookup order and the two shapes `/usr/bin/security -g`
  * prints (`password: 0x<hex>` and `password: "<text>"`), and they drive the
@@ -79,6 +76,47 @@ test('authFileCandidates orders the stores the CLI can actually use', () => {
         join(home, '.config', 'cursor', 'auth.json'),
         join(home, '.config', 'Cursor', 'auth.json'),
     ]);
+});
+
+test('Windows usage reads the current-user DPAPI store instead of the auth.json migration marker', async t => {
+    const root = tempDir(t);
+    const env = { APPDATA: join(root, 'Roaming'), HOME: root };
+    const dir = writeAuthFile(join(env.APPDATA, 'Cursor'), JSON.stringify({ storedIn: 'dpapi' }));
+    const path = join(dir, 'auth.dpapi');
+    writeFileSync(path, JSON.stringify({ version: 1, dpapi: 'Y2lwaGVy' }));
+    const auth = await readAccessToken(env, { platform: 'win32', unprotectDpapi: async blob => {
+        assert.equal(blob, 'Y2lwaGVy');
+        return { token: 'dpapi-fixture-token' };
+    } });
+    assert.deepEqual(auth, { ok: true, path, token: 'dpapi-fixture-token' });
+});
+
+test('Windows usage honours explicit token, file and memory choices before DPAPI', async t => {
+    const root = tempDir(t);
+    const env = { APPDATA: join(root, 'Roaming'), HOME: root };
+    const dir = writeAuthFile(join(env.APPDATA, 'Cursor'), JSON.stringify({ accessToken: 'legacy-fixture-token' }));
+    writeFileSync(join(dir, 'auth.dpapi'), JSON.stringify({ dpapi: 'Y2lwaGVy' }));
+    const opts = { platform: 'win32', unprotectDpapi: async () => assert.fail('DPAPI must not be tried') };
+    assert.equal((await readAccessToken({ ...env, CURSOR_AUTH_TOKEN: 'override-token' }, opts)).token, 'override-token');
+    assert.equal((await readAccessToken({ ...env, AGENT_CLI_CREDENTIAL_STORE: 'file' }, opts)).token, 'legacy-fixture-token');
+    const memory = await readAccessToken({ ...env, AGENT_CLI_CREDENTIAL_STORE: 'memory' }, opts);
+    assert.equal(memory.ok, false);
+    assert.match(memory.error, /AGENT_CLI_CREDENTIAL_STORE=memory/);
+});
+
+test('an unreadable DPAPI store falls back to legacy JSON without leaking file contents', async t => {
+    const root = tempDir(t);
+    const env = { APPDATA: join(root, 'Roaming'), HOME: root };
+    const dir = writeAuthFile(join(env.APPDATA, 'Cursor'), JSON.stringify({ accessToken: 'legacy-fixture-token' }));
+    const path = join(dir, 'auth.dpapi');
+    writeFileSync(path, '{ secret-dpapi-text');
+    const opts = { platform: 'win32', unprotectDpapi: async () => assert.fail('invalid input must not reach DPAPI') };
+    assert.equal((await readAccessToken(env, opts)).token, 'legacy-fixture-token');
+    writeAuthFile(dir, '{ secret-legacy-text');
+    const failed = await readAccessToken(env, opts);
+    assert.equal(failed.ok, false);
+    assert.match(failed.error, /auth\.dpapi.+cannot parse the DPAPI credential file/);
+    assert.doesNotMatch(failed.error, /secret-dpapi-text|secret-legacy-text/);
 });
 
 test('the macOS keychain item is decoded from the hex form of security -g', notWindows, async t => {
